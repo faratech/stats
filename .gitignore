@@ -1,0 +1,10 @@
+# Ignore all cache files
+__pycache__/
+*.py[cod]
+
+# Explicitly include the src/ directory
+!src/
+
+# Ignore cache files inside src/
+src/**/__pycache__/
+src/**/*.py[cod]
