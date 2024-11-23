@@ -1,0 +1,631 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ page_title }}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <!-- Meta tags to prevent caching -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <!-- Include Chart.js for interactive charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Include SortableJS for draggable grid items -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.13.0/Sortable.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; background-color: #0D1117; color: #C9D1D9; }
+        .container { padding: 20px; }
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #161B22;
+            padding: 10px 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .navbar img { height: 40px; }
+        .navbar h1 {
+            color: #58A6FF;
+            margin: 0;
+            font-size: 24px;
+        }
+        h2 { color: #D69D85; cursor: pointer; }
+        h3 { color: #58A6FF; }
+        pre { background: #1A1E25; padding: 10px; border: 1px solid #58A6FF; box-shadow: 0 0 10px #58A6FF; margin-top: 10px; overflow: auto; max-height: 600px; }
+        .section { margin-bottom: 20px; }
+        .footer { margin-top: 20px; font-size: 0.9em; color: #888; text-align: center; }
+        .status-green { color: #28a745; }
+        .status-red { color: #dc3545; }
+        .utilization-bar {
+            background-color: #1A1E25;
+            border: 1px solid #343a40;
+            border-radius: 5px;
+            overflow: hidden;
+            height: 20px;
+            margin-top: 5px;
+            width: 100%;
+            position: relative;
+        }
+        .utilization-fill {
+            height: 100%;
+            transition: width 0.5s;
+        }
+        .utilization-fill.green { background-color: #28a745; }
+        .utilization-fill.yellow { background-color: #ffc107; }
+        .utilization-fill.red { background-color: #dc3545; }
+        .utilization-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            top: 0;
+            left: 0;
+            line-height: 20px;
+            font-size: 12px;
+            color: #fff;
+        }
+        canvas { background-color: #1A1E25; }
+        .metric {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .metric-icon {
+            margin-right: 10px;
+        }
+        .chart-container {
+            width: 100%;
+            max-width: 400px;
+            margin: auto;
+        }
+        .progress-container {
+            width: 100%;
+            max-width: 600px;
+            margin: auto;
+        }
+        /* Grid layout */
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background-color: #161B22;
+            padding: 15px;
+            border: 1px solid #343a40;
+            border-radius: 5px;
+            box-shadow: 0 0 10px #343a40;
+            cursor: move; /* Indicate draggable */
+        }
+        .card h3 {
+            margin-top: 0;
+            color: #D69D85;
+        }
+        .card pre {
+            border: none;
+            box-shadow: none;
+            margin-top: 10px;
+        }
+        .chart-small {
+            width: 100%;
+            max-width: 300px;
+            margin: auto;
+        }
+        .service-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .service-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #1A1E25;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #343a40;
+        }
+        .service-status i {
+            margin-right: 10px;
+        }
+        /* Full-width card */
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        /* Double-width card */
+        .double-width {
+            grid-column: span 2;
+        }
+        /* Sortable ghost class */
+        .sortable-ghost {
+            opacity: 0.4;
+        }
+        /* Highlight animation */
+        .highlight {
+            animation: highlightFade 2s ease-in-out;
+        }
+        @keyframes highlightFade {
+            0% { background-color: rgba(255, 255, 0, 0.5); }
+            100% { background-color: transparent; }
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>{{ page_title }}</h1>
+    </div>
+    <div class="container">
+        <div id="dashboard" class="section">
+            <h2>System Dashboard</h2>
+            <div class="grid-container">
+                <!-- General Information Card -->
+                <div class="card" id="general_info_card">
+                    <h3><i class="fas fa-info-circle"></i> General Info</h3>
+                    <p id="hostname"></p>
+                    <p id="uptime_output"></p>
+                    <p id="os_release"></p>
+                    <p id="kernel_version"></p>
+                    <p id="logged_in_users"></p>
+                </div>
+                <!-- CPU Utilization Card -->
+                <div class="card" id="cpu_card">
+                    <h3><i class="fas fa-microchip"></i> CPU</h3>
+                    <p id="cpu_info"></p>
+                    <p id="cpu_frequency"></p>
+                    <div class="utilization-bar">
+                        <div id="cpu_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="cpu_utilization_text" class="utilization-text">0%</div>
+                    </div>
+                    <p id="load_avg"></p>
+                    <div class="chart-small">
+                        <canvas id="cpu_chart" width="300" height="150"></canvas>
+                    </div>
+                </div>
+                <!-- Memory Utilization Card -->
+                <div class="card" id="memory_card">
+                    <h3><i class="fas fa-memory"></i> Memory</h3>
+                    <div class="utilization-bar">
+                        <div id="memory_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="memory_utilization_text" class="utilization-text">0%</div>
+                    </div>
+                    <h3><i class="fas fa-hdd"></i> Swap</h3>
+                    <div class="utilization-bar">
+                        <div id="swap_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="swap_utilization_text" class="utilization-text">0%</div>
+                    </div>
+                </div>
+                <!-- Disk Utilization Card -->
+                <div class="card" id="disk_card">
+                    <h3><i class="fas fa-database"></i> Disk</h3>
+                    <div class="utilization-bar">
+                        <div id="disk_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="disk_utilization_text" class="utilization-text">0%</div>
+                    </div>
+                    <p id="disk_read_write"></p>
+                </div>
+                <!-- Network Card -->
+                <div class="card" id="network_card">
+                    <h3><i class="fas fa-network-wired"></i> Network</h3>
+                    <p id="network_info"></p>
+                    <div class="utilization-bar">
+                        <div id="network_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="network_utilization_text" class="utilization-text">0 KB/s</div>
+                    </div>
+                    <div class="chart-small">
+                        <canvas id="network_chart" width="300" height="150"></canvas>
+                    </div>
+                </div>
+                <!-- Services Card -->
+                <div class="card" id="services_card">
+                    <h3><i class="fas fa-server"></i> Services</h3>
+                    <div class="service-list" id="service_list">
+                        <!-- Service statuses will be dynamically generated -->
+                    </div>
+                </div>
+                <!-- Top Processes Card -->
+                <div class="card double-width" id="processes_card">
+                    <h3><i class="fas fa-tasks"></i> Top Processes</h3>
+                    <pre id="process_list"></pre>
+                </div>
+                <!-- Network Connections Card -->
+                <div class="card full-width" id="connections_card">
+                    <h3><i class="fas fa-plug"></i> Active Connections</h3>
+                    <pre id="network_connections"></pre>
+                </div>
+
+                <!-- Exchange-specific Cards -->
+                {% if is_exchange_server %}
+                <!-- The following sections will be displayed if the server is an Exchange Server -->
+                <!-- Exchange Services Card -->
+                <div class="card" id="exchange_services_card">
+                    <h3><i class="fas fa-server"></i> Exchange Services</h3>
+                    <div class="service-list" id="exchange_service_list">
+                        <!-- Exchange service statuses will be dynamically generated -->
+                    </div>
+                </div>
+                <!-- Exchange Logs Card -->
+                <div class="card double-width" id="exchange_logs_card">
+                    <h3><i class="fas fa-envelope"></i> Exchange Send/Receive Logs</h3>
+                    <pre id="exchange_logs"></pre>
+                </div>
+                <!-- Exchange Shell Output Card -->
+                <div class="card full-width" id="exchange_shell_output_card">
+                    <h3><i class="fas fa-terminal"></i> Exchange Shell Output</h3>
+                    <pre id="exchange_shell_output"></pre>
+                </div>
+                <!-- Event Logs Card -->
+                <div class="card full-width" id="event_logs_card">
+                    <h3><i class="fas fa-exclamation-triangle"></i> Event Logs</h3>
+                    <pre id="event_logs"></pre>
+                </div>
+                <!-- Security Logins Card -->
+                <div class="card full-width" id="security_logins_card">
+                    <h3><i class="fas fa-user-shield"></i> Recent Logins</h3>
+                    <pre id="security_logins"></pre>
+                </div>
+                {% endif %}
+                <!-- End of Exchange-specific Cards -->
+
+            </div>
+            <div class="footer" id="last_updated">
+                Last updated: --
+            </div>
+        </div>
+    </div>
+    <script>
+        function showSection(sectionId) {
+            var sections = document.querySelectorAll('.section');
+            sections.forEach(function(section) {
+                section.classList.add('hidden');
+            });
+            document.getElementById(sectionId).classList.remove('hidden');
+        }
+        // Initially show the Dashboard section
+        document.addEventListener("DOMContentLoaded", function() {
+            showSection('dashboard');
+            startWebSocket();
+
+            // Initialize SortableJS on the grid container
+            new Sortable(document.querySelector('.grid-container'), {
+                animation: 150,
+                handle: '.card',
+                ghostClass: 'sortable-ghost'
+            });
+        });
+
+        function getUtilizationClass(value) {
+            if (value < 50) {
+                return 'green';
+            } else if (value < 75) {
+                return 'yellow';
+            } else {
+                return 'red';
+            }
+        }
+
+        function updateUtilizationBar(fillElement, textElement, value, unit='%', max=100) {
+            const percent = (value / max) * 100;
+            fillElement.style.width = Math.min(percent, 100) + '%';
+            const utilizationClass = getUtilizationClass(percent);
+            fillElement.className = 'utilization-fill ' + utilizationClass;
+            textElement.textContent = `${value.toFixed(2)} ${unit}`;
+            if (utilizationClass === 'yellow') {
+                textElement.style.color = '#000'; // Black text
+            } else {
+                textElement.style.color = '#fff'; // White text
+            }
+        }
+
+        let cpuChart;
+        let networkChart;
+        let networkUploadHistory = [];
+        let networkDownloadHistory = [];
+        let networkLabels = [];
+        let previousData = {};
+
+        function highlightChanges(id) {
+            const element = document.getElementById(id);
+            if (element) {
+                element.classList.add('highlight');
+                setTimeout(() => {
+                    element.classList.remove('highlight');
+                }, 2000); // Duration of the highlight
+            }
+        }
+
+        function updateStats(data) {
+            // Update General Information
+            if (previousData.hostname !== data.hostname) {
+                document.getElementById('hostname').textContent = `Hostname: ${data.hostname}`;
+                highlightChanges('general_info_card');
+            }
+            if (previousData.uptime_output !== data.uptime_output) {
+                document.getElementById('uptime_output').textContent = `Uptime: ${data.uptime_output}`;
+            }
+            if (previousData.os_release !== data.os_release) {
+                document.getElementById('os_release').textContent = `OS: ${data.os_release}`;
+            }
+            if (previousData.kernel_version !== data.kernel_version) {
+                document.getElementById('kernel_version').textContent = `Kernel: ${data.kernel_version}`;
+            }
+            if (previousData.logged_in_users !== data.logged_in_users) {
+                document.getElementById('logged_in_users').textContent = `Logged-in Users: ${data.logged_in_users}`;
+            }
+
+            // Update CPU Information
+            if (previousData.cpu_info !== data.cpu_info) {
+                document.getElementById('cpu_info').textContent = `Model: ${data.cpu_info}`;
+            }
+            if (previousData.cpu_frequency !== data.cpu_frequency) {
+                document.getElementById('cpu_frequency').textContent = `Frequency: ${data.cpu_frequency}`;
+            }
+            if (previousData.load_avg !== data.load_avg) {
+                document.getElementById('load_avg').textContent = `Load Avg: ${data.load_avg}`;
+            }
+
+            // Update CPU Utilization Bar
+            updateUtilizationBar(
+                document.getElementById('cpu_utilization_fill'),
+                document.getElementById('cpu_utilization_text'),
+                data.cpu_utilization
+            );
+
+            // Update Memory Utilization Bar
+            updateUtilizationBar(
+                document.getElementById('memory_utilization_fill'),
+                document.getElementById('memory_utilization_text'),
+                data.memory_utilization
+            );
+
+            // Update Swap Utilization Bar
+            updateUtilizationBar(
+                document.getElementById('swap_utilization_fill'),
+                document.getElementById('swap_utilization_text'),
+                data.swap_utilization
+            );
+
+            // Update Disk Utilization Bar
+            updateUtilizationBar(
+                document.getElementById('disk_utilization_fill'),
+                document.getElementById('disk_utilization_text'),
+                data.disk_utilization
+            );
+
+            // Update Network Utilization Bar
+            const totalNetwork = data.network_utilization.upload + data.network_utilization.download;
+            const maxNetworkSpeed = 10000; // Adjust based on your network capacity
+            updateUtilizationBar(
+                document.getElementById('network_utilization_fill'),
+                document.getElementById('network_utilization_text'),
+                totalNetwork,
+                'KB/s',
+                maxNetworkSpeed
+            );
+
+            // Update Network Information
+            if (previousData.network_info !== data.network_info) {
+                document.getElementById('network_info').textContent = data.network_info;
+            }
+            if (previousData.disk_read_write !== `${data.disk_read}, ${data.disk_write}`) {
+                document.getElementById('disk_read_write').textContent = `Disk I/O - Read: ${data.disk_read}, Write: ${data.disk_write}`;
+            }
+
+            // Update Network Connections
+            if (previousData.network_connections !== data.network_connections) {
+                document.getElementById('network_connections').textContent = data.network_connections;
+                highlightChanges('connections_card');
+            }
+
+            // Update Process List
+            const processList = data.process_list.map(function(proc) {
+                return `PID: ${proc.pid}, Name: ${proc.name}, CPU%: ${proc.cpu_percent.toFixed(1)}, MEM%: ${proc.memory_percent.toFixed(1)}`;
+            }).join('\n');
+            if (previousData.process_list !== processList) {
+                document.getElementById('process_list').textContent = processList;
+                highlightChanges('processes_card');
+            }
+
+            // Update Service Statuses
+            const serviceListElement = document.getElementById('service_list');
+            if (JSON.stringify(previousData.service_status) !== JSON.stringify(data.service_status)) {
+                serviceListElement.innerHTML = ''; // Clear existing services
+                for (const [serviceName, status] of Object.entries(data.service_status)) {
+                    const serviceElement = document.createElement('div');
+                    serviceElement.className = 'service-status';
+                    serviceElement.innerHTML = `
+                        <div>${serviceName}</div>
+                        <span>${status
+                            ? '<span class="status-green"><i class="fas fa-check-circle"></i></span>'
+                            : '<span class="status-red"><i class="fas fa-times-circle"></i></span>'}</span>
+                    `;
+                    serviceListElement.appendChild(serviceElement);
+                }
+                highlightChanges('services_card');
+            }
+
+            // Update Last Updated Time
+            document.getElementById('last_updated').textContent = `Last updated: ${data.current_time}`;
+
+            // Update Charts
+            updateCharts(data);
+
+            // Check if the server is an Exchange Server
+            if (data.is_exchange_server === true || data.is_exchange_server === 'True') {
+                // Update Exchange Services
+                const exchangeServiceListElement = document.getElementById('exchange_service_list');
+                if (JSON.stringify(previousData.exchange_services_status) !== JSON.stringify(data.exchange_services_status)) {
+                    exchangeServiceListElement.innerHTML = ''; // Clear existing services
+                    for (const [serviceName, status] of Object.entries(data.exchange_services_status)) {
+                        const serviceElement = document.createElement('div');
+                        serviceElement.className = 'service-status';
+                        serviceElement.innerHTML = `
+                            <div>${serviceName}</div>
+                            <span>${status
+                                ? '<span class="status-green"><i class="fas fa-check-circle"></i></span>'
+                                : '<span class="status-red"><i class="fas fa-times-circle"></i></span>'}</span>
+                        `;
+                        exchangeServiceListElement.appendChild(serviceElement);
+                    }
+                    highlightChanges('exchange_services_card');
+                }
+
+                // Update Exchange Logs
+                const exchangeLogsContent = `--- Send Logs ---\n${data.exchange_logs.send_log.join('\n')}\n\n--- Receive Logs ---\n${data.exchange_logs.receive_log.join('\n')}`;
+                if (previousData.exchange_logs_content !== exchangeLogsContent) {
+                    document.getElementById('exchange_logs').textContent = exchangeLogsContent;
+                    highlightChanges('exchange_logs_card');
+                }
+
+                // Update Exchange Shell Output
+                if (previousData.exchange_shell_output !== data.exchange_shell_output) {
+                    document.getElementById('exchange_shell_output').textContent = data.exchange_shell_output;
+                    highlightChanges('exchange_shell_output_card');
+                }
+
+                // Update Event Logs
+                const eventLogsContent = data.event_logs.map(event => {
+                    return `[${event.TimeGenerated}] ${event.SourceName} (Event ID: ${event.EventID})\n${event.StringInserts ? event.StringInserts.join('\n') : ''}\n`;
+                }).join('\n');
+                if (previousData.event_logs_content !== eventLogsContent) {
+                    document.getElementById('event_logs').textContent = eventLogsContent;
+                    highlightChanges('event_logs_card');
+                }
+
+                // Update Security Logins
+                const securityLoginsContent = data.security_logins.map(event => {
+                    return `[${event.TimeGenerated}] ${event.SourceName} (Event ID: ${event.EventID})\n${event.StringInserts ? event.StringInserts.join('\n') : ''}\n`;
+                }).join('\n');
+                if (previousData.security_logins_content !== securityLoginsContent) {
+                    document.getElementById('security_logins').textContent = securityLoginsContent;
+                    highlightChanges('security_logins_card');
+                }
+
+                // Store contents for comparison in next update
+                previousData.exchange_logs_content = exchangeLogsContent;
+                previousData.event_logs_content = eventLogsContent;
+                previousData.security_logins_content = securityLoginsContent;
+                previousData.exchange_shell_output = data.exchange_shell_output;
+            }
+
+            // Update previousData
+            previousData = data;
+        }
+
+        function updateCharts(data) {
+            // Update CPU Chart
+            if (!cpuChart) {
+                const ctx = document.getElementById('cpu_chart').getContext('2d');
+                cpuChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.per_cpu_utilization.map(function(_, index) { return 'CPU ' + index; }),
+                        datasets: [{
+                            label: 'Per CPU Utilization (%)',
+                            data: data.per_cpu_utilization,
+                            backgroundColor: data.per_cpu_utilization.map(function(value) {
+                                return value < 50 ? '#28a745' : value < 75 ? '#ffc107' : '#dc3545';
+                            }),
+                            borderColor: '#58A6FF',
+                            borderWidth: 1,
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: { beginAtZero: true, max: 100 }
+                        },
+                        plugins: {
+                            legend: { display: false }
+                        }
+                    }
+                });
+            } else {
+                cpuChart.data.datasets[0].data = data.per_cpu_utilization;
+                cpuChart.data.datasets[0].backgroundColor = data.per_cpu_utilization.map(function(value) {
+                    return value < 50 ? '#28a745' : value < 75 ? '#ffc107' : '#dc3545';
+                });
+                cpuChart.update();
+            }
+
+            // Update Network Chart
+            const currentTime = new Date().toLocaleTimeString();
+            networkLabels.push(currentTime);
+            networkUploadHistory.push(data.network_utilization.upload);
+            networkDownloadHistory.push(data.network_utilization.download);
+
+            if (networkLabels.length > 20) {
+                networkLabels.shift();
+                networkUploadHistory.shift();
+                networkDownloadHistory.shift();
+            }
+
+            if (!networkChart) {
+                const ctx = document.getElementById('network_chart').getContext('2d');
+                networkChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: networkLabels,
+                        datasets: [
+                            {
+                                label: 'Upload (KB/s)',
+                                data: networkUploadHistory,
+                                backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                                borderColor: '#28a745',
+                                fill: true,
+                            },
+                            {
+                                label: 'Download (KB/s)',
+                                data: networkDownloadHistory,
+                                backgroundColor: 'rgba(88, 166, 255, 0.2)',
+                                borderColor: '#58A6FF',
+                                fill: true,
+                            }
+                        ]
+                    },
+                    options: {
+                        scales: {
+                            y: { beginAtZero: true },
+                            x: { display: true }
+                        },
+                        plugins: {
+                            legend: { display: true }
+                        }
+                    }
+                });
+            } else {
+                networkChart.data.labels = networkLabels;
+                networkChart.data.datasets[0].data = networkUploadHistory;
+                networkChart.data.datasets[1].data = networkDownloadHistory;
+                networkChart.update();
+            }
+        }
+
+        let ws;
+
+        function startWebSocket() {
+            const ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
+            const ws_path = ws_scheme + "://" + window.location.host + "/ws";
+            ws = new WebSocket(ws_path);
+
+            ws.onopen = function() {
+                console.log('WebSocket connection established');
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                updateStats(data);
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket connection closed');
+                // Try to reconnect after a delay
+                setTimeout(startWebSocket, 5000);
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                ws.close();
+            };
+        }
+    </script>
+</body>
+</html>
