@@ -6,7 +6,7 @@ block_cipher = None
 a = Analysis(['main.py'],
              pathex=['.'],
              binaries=[],
-             datas=[('templates', 'templates')],
+             datas=[],
              hiddenimports=[
                  'asyncio',
                  'uvicorn',
@@ -28,8 +28,6 @@ a = Analysis(['main.py'],
                  'http',
                  'email',
                  'certifi',  # SSL certificates
-                 'jinja2',  # Templating
-                 'jinja2.ext',  # Jinja2 extensions
              ],
              hookspath=[],
              hooksconfig={},
@@ -62,3 +60,4 @@ coll = COLLECT(exe,
                upx=True,
                upx_exclude=[],
                name='stats_app')
+

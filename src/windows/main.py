@@ -1,7 +1,5 @@
-# main.py
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 import asyncio
 import psutil
 from datetime import datetime
@@ -12,30 +10,11 @@ import win32service
 import win32serviceutil
 import subprocess
 import webbrowser
-import win32evtlog
-import threading
-import logging
 
 app = FastAPI()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler("exchange_monitoring.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
 # Cache for static data
 static_data = {}
-
-# Set up the templates directory
-current_dir = os.path.dirname(os.path.abspath(__file__))
-templates_dir = os.path.join(current_dir, "templates")
-templates = Jinja2Templates(directory=templates_dir)
 
 # Initialize static data that doesn't change frequently
 async def initialize_static_data():
@@ -45,39 +24,17 @@ async def initialize_static_data():
     static_data['hostname'] = socket.gethostname()
     static_data['cpu_frequency'] = get_cpu_frequency()
     static_data['logged_in_users'] = get_logged_in_users()
-    static_data['is_exchange_server'] = is_exchange_server()
-
-def is_exchange_server():
-    """
-    Determines if the current server is an Exchange Server by checking
-    the status of the Microsoft Exchange Transport Service.
-    """
-    exchange_service = 'MSExchangeTransport'
-    try:
-        status = win32serviceutil.QueryServiceStatus(exchange_service)[1]
-        is_running = status == win32service.SERVICE_RUNNING
-        logger.info(f"Exchange Service '{exchange_service}' running: {is_running}")
-        return is_running
-    except Exception as e:
-        logger.error(f"Error checking Exchange service '{exchange_service}': {e}")
-        return False  # Service not found or other error
 
 def get_logged_in_users():
     try:
         users = psutil.users()
-        user_count = len(users)
-        logger.info(f"Logged-in users count: {user_count}")
-        return user_count
-    except Exception as e:
-        logger.error(f"Error retrieving logged-in users: {e}")
+        return len(users)
+    except Exception:
         return 0
 
 # Function to check service status on Windows
 async def get_service_status():
-    """
-    Checks the status of critical Windows services.
-    Returns a dictionary with service display names and their running status.
-    """
+    # List of critical Windows services to monitor
     services = {
         'Spooler': 'Print Spooler',
         'W32Time': 'Windows Time',
@@ -116,6 +73,7 @@ async def get_service_status():
         'Audiosrv': 'Windows Audio',
         'AudioEndpointBuilder': 'Windows Audio Endpoint Builder',
         'Appinfo': 'Application Information',
+        'BITS': 'Background Intelligent Transfer Service',
         'Browser': 'Computer Browser',
         'CryptSvc': 'Cryptographic Services',
         'DcomLaunch': 'DCOM Server Process Launcher',
@@ -126,265 +84,44 @@ async def get_service_status():
         'hkmsvc': 'Health Key and Certificate Management',
         'HomeGroupListener': 'HomeGroup Listener',
         'HomeGroupProvider': 'HomeGroup Provider',
+        'IKEEXT': 'IKE and AuthIP IPsec Keying Modules',
         'lmhosts': 'TCP/IP NetBIOS Helper',
         'MSDTC': 'Distributed Transaction Coordinator',
         'NcdAutoSetup': 'Network Connected Devices Auto-Setup',
+        'NlaSvc': 'Network Location Awareness',
         'nsi': 'Network Store Interface Service',
         'PeerDistSvc': 'BranchCache',
         'PnrpAutoReg': 'PNRP Machine Name Publication Service',
         'PNRPSvc': 'Peer Name Resolution Protocol',
+        'PolicyAgent': 'IPsec Policy Agent',
         'RpcLocator': 'Remote Procedure Call (RPC) Locator',
         'RemoteAccess': 'Routing and Remote Access',
+        'RemoteRegistry': 'Remote Registry',
         'Schedule': 'Task Scheduler',
+        'SessionEnv': 'Remote Desktop Configuration',
         'SSDPSRV': 'SSDP Discovery',
+        'TermService': 'Remote Desktop Services',
         'TrkWks': 'Distributed Link Tracking Client',
+        'W32Time': 'Windows Time',
         'WinHttpAutoProxySvc': 'WinHTTP Web Proxy Auto-Discovery Service',
+        'Winmgmt': 'Windows Management Instrumentation',
         'WSearch': 'Windows Search',
+        'wuauserv': 'Windows Update',
     }
     service_status = {}
     for service_name, display_name in services.items():
         try:
             status = win32serviceutil.QueryServiceStatus(service_name)[1]
             service_status[display_name] = (status == win32service.SERVICE_RUNNING)
-            logger.debug(f"Service '{display_name}' running: {service_status[display_name]}")
-        except Exception as e:
+        except Exception:
             service_status[display_name] = False
-            logger.warning(f"Error querying service '{display_name}': {e}")
-    return service_status
-
-def get_exchange_installation_path():
-    """
-    Determines the installation directory of Microsoft Exchange by querying the MSExchangeTransport service.
-    Returns the installation path if found, else None.
-    """
-    try:
-        service_name = 'MSExchangeTransport'
-        config = win32serviceutil.QueryServiceConfig(service_name)
-        
-        # The binary path may contain quotes and command-line arguments
-        binary_path = config[3]
-        if '"' in binary_path:
-            exe_path = binary_path.split('"')[1]
-        else:
-            exe_path = binary_path.split(' ')[0]
-        
-        # Assuming the binary is located in the 'Bin' directory under the installation path
-        # e.g., 'C:\Program Files\Microsoft\Exchange Server\V15\Bin\MSExchangeTransport.exe'
-        bin_dir = os.path.dirname(exe_path)
-        install_dir = os.path.dirname(bin_dir)
-        
-        if os.path.exists(install_dir):
-            logger.info(f"Exchange installation directory found: {install_dir}")
-            return install_dir
-        else:
-            logger.error(f"Exchange installation directory does not exist: {install_dir}")
-            return None
-    except Exception as e:
-        logger.error(f"Error finding Exchange installation path: {e}")
-        return None
-
-def get_exchange_send_receive_logs(num_lines=10):
-    """
-    Retrieves the latest send and receive logs from Exchange Transport Logs by dynamically determining the log paths.
-    """
-    logs = {}
-    install_dir = get_exchange_installation_path()
-    
-    if not install_dir:
-        logger.error("Exchange installation path not found. Cannot retrieve send/receive logs.")
-        logs['send_log'] = []
-        logs['receive_log'] = []
-        return logs
-    
-    send_log_path = os.path.join(install_dir, 'TransportRoles', 'Logs', 'ProtocolLog', 'SmtpSend')
-    receive_log_path = os.path.join(install_dir, 'TransportRoles', 'Logs', 'ProtocolLog', 'SmtpReceive')
-
-    # Get the latest log file in the directory
-    def get_latest_log(log_dir):
-        try:
-            if not os.path.exists(log_dir):
-                logger.error(f"Log directory does not exist: {log_dir}")
-                return None
-            files = [os.path.join(log_dir, f) for f in os.listdir(log_dir) if os.path.isfile(os.path.join(log_dir, f))]
-            if not files:
-                logger.warning(f"No log files found in directory: {log_dir}")
-                return None
-            latest_file = max(files, key=os.path.getmtime)
-            logger.debug(f"Latest log file in '{log_dir}': {latest_file}")
-            return latest_file
-        except Exception as e:
-            logger.error(f"Error accessing log directory {log_dir}: {e}")
-            return None
-
-    send_log_file = get_latest_log(send_log_path)
-    receive_log_file = get_latest_log(receive_log_path)
-
-    def tail(file_path, num_lines):
-        try:
-            with open(file_path, 'rb') as f:
-                f.seek(0, os.SEEK_END)
-                end = f.tell()
-                buffer = bytearray()
-                lines = []
-                pointer = end - 1
-                while pointer >= 0 and len(lines) < num_lines:
-                    f.seek(pointer)
-                    new_byte = f.read(1)
-                    if new_byte == b'\n':
-                        line = buffer.decode('utf-8', errors='replace')[::-1]
-                        lines.insert(0, line)
-                        buffer = bytearray()
-                    else:
-                        buffer.extend(new_byte)
-                    pointer -= 1
-                if buffer:
-                    lines.insert(0, buffer.decode('utf-8', errors='replace')[::-1])
-                return lines[-num_lines:]
-        except Exception as e:
-            logger.error(f"Error reading file {file_path}: {e}")
-            return []
-
-    if send_log_file:
-        logs['send_log'] = tail(send_log_file, num_lines)
-    else:
-        logs['send_log'] = []
-
-    if receive_log_file:
-        logs['receive_log'] = tail(receive_log_file, num_lines)
-    else:
-        logs['receive_log'] = []
-
-    return logs
-
-def get_event_logs(log_type='Application', event_levels=['Critical', 'Error', 'Warning'], num_events=10):
-    """
-    Retrieves recent event logs based on specified criteria.
-    """
-    formatted_events = []
-    try:
-        log_handle = win32evtlog.OpenEventLog(None, log_type)
-        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        events = []
-        while len(events) < num_events:
-            records = win32evtlog.ReadEventLog(log_handle, flags, 0)
-            if not records:
-                break
-            for event in records:
-                if len(events) >= num_events:
-                    break
-                event_level = ''
-                if event.EventType == win32evtlog.EVENTLOG_ERROR_TYPE:
-                    event_level = 'Error'
-                elif event.EventType == win32evtlog.EVENTLOG_WARNING_TYPE:
-                    event_level = 'Warning'
-                elif event.EventType == win32evtlog.EVENTLOG_INFORMATION_TYPE:
-                    event_level = 'Information'
-                elif event.EventType == win32evtlog.EVENTLOG_AUDIT_FAILURE:
-                    event_level = 'Audit Failure'
-                elif event.EventType == win32evtlog.EVENTLOG_AUDIT_SUCCESS:
-                    event_level = 'Audit Success'
-                if event_level in event_levels:
-                    events.append(event)
-        # Format the events
-        for event in events:
-            record = {
-                'SourceName': event.SourceName,
-                'EventID': event.EventID & 0xFFFF,  # Masking to get the actual EventID
-                'EventType': event.EventType,
-                'TimeGenerated': event.TimeGenerated.Format(),
-                'EventCategory': event.EventCategory,
-                'StringInserts': event.StringInserts
-            }
-            formatted_events.append(record)
-        logger.info(f"Retrieved {len(formatted_events)} event logs from '{log_type}'")
-    except Exception as e:
-        logger.error(f"Error reading event logs: {e}")
-    finally:
-        try:
-            win32evtlog.CloseEventLog(log_handle)
-        except:
-            pass
-    return formatted_events
-
-def get_security_logins(num_events=10):
-    """
-    Retrieves recent security login events.
-    """
-    formatted_events = []
-    try:
-        log_handle = win32evtlog.OpenEventLog(None, 'Security')
-        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        events = []
-        while len(events) < num_events:
-            records = win32evtlog.ReadEventLog(log_handle, flags, 0)
-            if not records:
-                break
-            for event in records:
-                if len(events) >= num_events:
-                    break
-                if event.EventID & 0xFFFF == 4624:  # Logon event
-                    events.append(event)
-        # Format the events
-        for event in events:
-            record = {
-                'SourceName': event.SourceName,
-                'EventID': event.EventID & 0xFFFF,  # Masking to get the actual EventID
-                'TimeGenerated': event.TimeGenerated.Format(),
-                'StringInserts': event.StringInserts
-            }
-            formatted_events.append(record)
-        logger.info(f"Retrieved {len(formatted_events)} security login events")
-    except Exception as e:
-        logger.error(f"Error reading security logs: {e}")
-    finally:
-        try:
-            win32evtlog.CloseEventLog(log_handle)
-        except:
-            pass
-    return formatted_events
-
-def get_exchange_service_status():
-    """
-    Retrieves the status of Exchange-specific services.
-    """
-    exchange_services = {
-        'MSExchangeADTopology': 'Microsoft Exchange Active Directory Topology',
-        'MSExchangeTransport': 'Microsoft Exchange Transport',
-        'MSExchangeIS': 'Microsoft Exchange Information Store',
-        'MSExchangeMailboxAssistants': 'Microsoft Exchange Mailbox Assistants',
-        'MSExchangeMailboxReplication': 'Microsoft Exchange Mailbox Replication',
-        'MSExchangeIMAP4': 'Microsoft Exchange IMAP4',
-        'MSExchangePOP3': 'Microsoft Exchange POP3',
-        'MSExchangeServiceHost': 'Microsoft Exchange Service Host',
-        'MSExchangeUM': 'Microsoft Exchange Unified Messaging',
-        'MSExchangeThrottling': 'Microsoft Exchange Throttling',
-        'MSExchangeAB': 'Microsoft Exchange Address Book',
-        'MSExchangeRPC': 'Microsoft Exchange RPC Client Access',
-        'MSExchangeDelivery': 'Microsoft Exchange Mailbox Transport Delivery',
-        'MSExchangeSubmission': 'Microsoft Exchange Mailbox Transport Submission',
-        'MSExchangeHM': 'Microsoft Exchange Health Manager',
-        'MSExchangeFrontendTransport': 'Microsoft Exchange Frontend Transport',
-        'MSExchangeEdgeSync': 'Microsoft Exchange EdgeSync',
-    }
-    service_status = {}
-    for service_name, display_name in exchange_services.items():
-        try:
-            status = win32serviceutil.QueryServiceStatus(service_name)[1]
-            service_status[display_name] = (status == win32service.SERVICE_RUNNING)
-            logger.debug(f"Exchange Service '{display_name}' running: {service_status[display_name]}")
-        except Exception as e:
-            service_status[display_name] = False
-            logger.warning(f"Error querying Exchange service '{display_name}': {e}")
     return service_status
 
 # Function to get network connections
 def get_network_connections():
-    """
-    Retrieves current network connections.
-    """
-    formatted_connections = []
     try:
         connections = psutil.net_connections(kind='inet')
+        formatted_connections = []
         for conn in connections:
             laddr = f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else ""
             raddr = f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else ""
@@ -394,57 +131,31 @@ def get_network_connections():
                 'raddr': raddr,
                 'status': conn.status
             })
-        logger.info(f"Retrieved {len(formatted_connections)} network connections")
-    except Exception as e:
-        logger.error(f"Error retrieving network connections: {e}")
-    return formatted_connections
+        return formatted_connections
+    except Exception:
+        return []
 
 # Function to get CPU info
 def get_cpu_info():
     try:
-        cpu_info = platform.processor()
-        logger.debug(f"CPU Info: {cpu_info}")
-        return cpu_info
-    except Exception as e:
-        logger.error(f"Error retrieving CPU info: {e}")
+        return platform.processor()
+    except Exception:
         return "N/A"
 
 # Function to get CPU frequency
 def get_cpu_frequency():
     try:
         cpu_freq = psutil.cpu_freq()
-        freq = f"{cpu_freq.current:.2f} MHz" if cpu_freq else "N/A"
-        logger.debug(f"CPU Frequency: {freq}")
-        return freq
-    except Exception as e:
-        logger.error(f"Error retrieving CPU frequency: {e}")
+        return f"{cpu_freq.current:.2f} MHz" if cpu_freq else "N/A"
+    except Exception:
         return "N/A"
 
 # Function to collect stats
 async def collect_stats(previous_net_io):
-    stats = {}
     try:
         # Get service statuses
         service_status = await get_service_status()
-        stats['service_status'] = service_status
-    except Exception as e:
-        logger.error(f"Failed to get service statuses: {e}")
-        stats['service_status'] = {}
 
-    # Determine if it's an Exchange server
-    is_exchange = static_data.get('is_exchange_server', False)
-    stats['is_exchange_server'] = is_exchange
-
-    if is_exchange:
-        try:
-            # Get Exchange-specific service statuses
-            exchange_services_status = get_exchange_service_status()
-            stats['exchange_services_status'] = exchange_services_status
-        except Exception as e:
-            logger.error(f"Failed to get Exchange service statuses: {e}")
-            stats['exchange_services_status'] = {}
-
-    try:
         # Get utilization data using psutil
         cpu_utilization = psutil.cpu_percent(interval=0)
         per_cpu_utilization = psutil.cpu_percent(interval=0, percpu=True)
@@ -510,29 +221,15 @@ async def collect_stats(previous_net_io):
         # Current time
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Collect Exchange-specific data if applicable
-        if is_exchange:
-            try:
-                exchange_logs = get_exchange_send_receive_logs(num_lines=10)
-                event_logs = get_event_logs(log_type='Application', event_levels=['Critical', 'Error', 'Warning'], num_events=10)
-                security_logins = get_security_logins(num_events=10)
-                stats['exchange_logs'] = exchange_logs
-                stats['event_logs'] = event_logs
-                stats['security_logins'] = security_logins
-            except Exception as e:
-                logger.error(f"Failed to collect Exchange-specific data: {e}")
-                stats['exchange_logs'] = []
-                stats['event_logs'] = []
-                stats['security_logins'] = []
-
         # Package all stats into a dictionary
-        stats.update({
+        stats = {
             'cpu_utilization': cpu_utilization,
             'per_cpu_utilization': per_cpu_utilization,
             'memory_utilization': memory_utilization,
             'swap_utilization': swap_utilization,
             'disk_utilization': disk_utilization,
             'network_utilization': network_utilization,
+            'service_status': service_status,
             'current_time': current_time,
             'uptime_output': uptime_output,
             'process_list': processes_sorted,  # Send as list of dicts
@@ -541,37 +238,16 @@ async def collect_stats(previous_net_io):
             'disk_read': disk_read,
             'disk_write': disk_write,
             'load_avg': load_avg_str,
-            'current_net_io': net_io,  # Include for next iteration
-        })
+            'current_net_io': net_io  # Include for next iteration
+        }
 
+        # Combine static data and dynamic stats
+        stats.update(static_data)
+
+        return stats
     except Exception as e:
-        logger.error(f"Error collecting utilization and system stats: {e}")
-        # Set default or empty values
-        stats.update({
-            'cpu_utilization': 0,
-            'per_cpu_utilization': [],
-            'memory_utilization': 0,
-            'swap_utilization': 0,
-            'disk_utilization': 0,
-            'network_utilization': {'upload': 0, 'download': 0},
-            'current_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'uptime_output': "0h 0m 0s",
-            'process_list': [],
-            'network_info': "Upload: 0.00 KB/s, Download: 0.00 KB/s",
-            'network_connections': "",
-            'disk_read': "0 MB",
-            'disk_write': "0 MB",
-            'load_avg': "N/A",
-            'current_net_io': None,
-        })
-        if is_exchange:
-            stats.update({
-                'exchange_logs': [],
-                'event_logs': [],
-                'security_logins': [],
-            })
-
-    return stats
+        print(f"Error collecting stats: {e}")
+        return {}
 
 # WebSocket endpoint to stream stats
 @app.websocket("/ws")
@@ -586,56 +262,528 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(1)  # Adjust the interval as needed
             previous_net_io = stats.get('current_net_io')
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
+        pass
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        print(f"WebSocket error: {e}")
         await websocket.close()
 
 # Serve the HTML page
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    try:
-        await initialize_static_data()  # Ensure static data is initialized
-        page_title = "System Monitor"
-        if static_data.get('is_exchange_server'):
-            page_title = "Exchange Monitoring System"
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "page_title": page_title,
-            "is_exchange_server": static_data.get('is_exchange_server')
-        })
-    except Exception as e:
-        logger.error(f"Error rendering template: {e}")
-        return HTMLResponse("<h1>Internal Server Error</h1>", status_code=500)
+async def index():
+    html_content = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>System Monitor</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <!-- Meta tags to prevent caching -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <!-- Include Chart.js for interactive charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Include SortableJS for draggable grid items -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.13.0/Sortable.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; background-color: #0D1117; color: #C9D1D9; }
+        .container { padding: 20px; }
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #161B22;
+            padding: 10px 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .navbar img { height: 40px; }
+        .navbar h1 {
+            color: #58A6FF;
+            margin: 0;
+            font-size: 24px;
+        }
+        h2 { color: #D69D85; cursor: pointer; }
+        h3 { color: #58A6FF; }
+        pre { background: #1A1E25; padding: 10px; border: 1px solid #58A6FF; box-shadow: 0 0 10px #58A6FF; margin-top: 10px; overflow: auto; max-height: 600px; }
+        .section { margin-bottom: 20px; }
+        .footer { margin-top: 20px; font-size: 0.9em; color: #888; text-align: center; }
+        .status-green { color: #28a745; }
+        .status-red { color: #dc3545; }
+        .utilization-bar {
+            background-color: #1A1E25;
+            border: 1px solid #343a40;
+            border-radius: 5px;
+            overflow: hidden;
+            height: 20px;
+            margin-top: 5px;
+            width: 100%;
+            position: relative;
+        }
+        .utilization-fill {
+            height: 100%;
+            transition: width 0.5s;
+        }
+        .utilization-fill.green { background-color: #28a745; }
+        .utilization-fill.yellow { background-color: #ffc107; }
+        .utilization-fill.red { background-color: #dc3545; }
+        .utilization-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            top: 0;
+            left: 0;
+            line-height: 20px;
+            font-size: 12px;
+            color: #fff;
+        }
+        canvas { background-color: #1A1E25; }
+        .metric {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .metric-icon {
+            margin-right: 10px;
+        }
+        .chart-container {
+            width: 100%;
+            max-width: 400px;
+            margin: auto;
+        }
+        .progress-container {
+            width: 100%;
+            max-width: 600px;
+            margin: auto;
+        }
+        /* Grid layout */
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background-color: #161B22;
+            padding: 15px;
+            border: 1px solid #343a40;
+            border-radius: 5px;
+            box-shadow: 0 0 10px #343a40;
+            cursor: move; /* Indicate draggable */
+        }
+        .card h3 {
+            margin-top: 0;
+            color: #D69D85;
+        }
+        .card pre {
+            border: none;
+            box-shadow: none;
+            margin-top: 10px;
+        }
+        .chart-small {
+            width: 100%;
+            max-width: 300px;
+            margin: auto;
+        }
+        .service-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .service-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background-color: #1A1E25;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #343a40;
+        }
+        .service-status i {
+            margin-right: 10px;
+        }
+        /* Full-width card */
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        /* Double-width card */
+        .double-width {
+            grid-column: span 2;
+        }
+        /* Sortable ghost class */
+        .sortable-ghost {
+            opacity: 0.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>System Monitor</h1>
+    </div>
+    <div class="container">
+        <div id="dashboard" class="section">
+            <h2>System Dashboard</h2>
+            <div class="grid-container">
+                <!-- General Information Card -->
+                <div class="card">
+                    <h3><i class="fas fa-info-circle"></i> General Info</h3>
+                    <p id="hostname"></p>
+                    <p id="uptime_output"></p>
+                    <p id="os_release"></p>
+                    <p id="kernel_version"></p>
+                    <p id="logged_in_users"></p>
+                </div>
+                <!-- CPU Utilization Card -->
+                <div class="card">
+                    <h3><i class="fas fa-microchip"></i> CPU</h3>
+                    <p id="cpu_info"></p>
+                    <p id="cpu_frequency"></p>
+                    <div class="utilization-bar">
+                        <div id="cpu_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="cpu_utilization_text" class="utilization-text">0%</div>
+                    </div>
+                    <p id="load_avg"></p>
+                    <div class="chart-small">
+                        <canvas id="cpu_chart" width="300" height="150"></canvas>
+                    </div>
+                </div>
+                <!-- Memory Utilization Card -->
+                <div class="card">
+                    <h3><i class="fas fa-memory"></i> Memory</h3>
+                    <div class="utilization-bar">
+                        <div id="memory_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="memory_utilization_text" class="utilization-text">0%</div>
+                    </div>
+                    <h3><i class="fas fa-hdd"></i> Swap</h3>
+                    <div class="utilization-bar">
+                        <div id="swap_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="swap_utilization_text" class="utilization-text">0%</div>
+                    </div>
+                </div>
+                <!-- Disk Utilization Card -->
+                <div class="card">
+                    <h3><i class="fas fa-database"></i> Disk</h3>
+                    <div class="utilization-bar">
+                        <div id="disk_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="disk_utilization_text" class="utilization-text">0%</div>
+                    </div>
+                    <p id="disk_read_write"></p>
+                </div>
+                <!-- Network Card -->
+                <div class="card">
+                    <h3><i class="fas fa-network-wired"></i> Network</h3>
+                    <p id="network_info"></p>
+                    <div class="utilization-bar">
+                        <div id="network_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
+                        <div id="network_utilization_text" class="utilization-text">0 KB/s</div>
+                    </div>
+                    <div class="chart-small">
+                        <canvas id="network_chart" width="300" height="150"></canvas>
+                    </div>
+                </div>
+                <!-- Services Card -->
+                <div class="card">
+                    <h3><i class="fas fa-server"></i> Services</h3>
+                    <div class="service-list" id="service_list">
+                        <!-- Service statuses will be dynamically generated -->
+                    </div>
+                </div>
+                <!-- Top Processes Card -->
+                <div class="card double-width">
+                    <h3><i class="fas fa-tasks"></i> Top Processes</h3>
+                    <pre id="process_list"></pre>
+                </div>
+                <!-- Network Connections Card -->
+                <div class="card full-width">
+                    <h3><i class="fas fa-plug"></i> Active Connections</h3>
+                    <pre id="network_connections"></pre>
+                </div>
+            </div>
+            <div class="footer" id="last_updated">
+                Last updated: --
+            </div>
+        </div>
+    </div>
+    <script>
+        function showSection(sectionId) {
+            var sections = document.querySelectorAll('.section');
+            sections.forEach(function(section) {
+                section.classList.add('hidden');
+            });
+            document.getElementById(sectionId).classList.remove('hidden');
+        }
+        // Initially show the Dashboard section
+        document.addEventListener("DOMContentLoaded", function() {
+            showSection('dashboard');
+            startWebSocket();
+
+            // Initialize SortableJS on the grid container
+            new Sortable(document.querySelector('.grid-container'), {
+                animation: 150,
+                handle: '.card',
+                ghostClass: 'sortable-ghost'
+            });
+        });
+
+        function getUtilizationClass(value) {
+            if (value < 50) {
+                return 'green';
+            } else if (value < 75) {
+                return 'yellow';
+            } else {
+                return 'red';
+            }
+        }
+
+        function updateUtilizationBar(fillElement, textElement, value, unit='%', max=100) {
+            const percent = (value / max) * 100;
+            fillElement.style.width = Math.min(percent, 100) + '%';
+            const utilizationClass = getUtilizationClass(percent);
+            fillElement.className = 'utilization-fill ' + utilizationClass;
+            textElement.textContent = `${value.toFixed(2)} ${unit}`;
+            if (utilizationClass === 'yellow') {
+                textElement.style.color = '#000'; // Black text
+            } else {
+                textElement.style.color = '#fff'; // White text
+            }
+        }
+
+        let cpuChart;
+        let networkChart;
+        let networkUploadHistory = [];
+        let networkDownloadHistory = [];
+        let networkLabels = [];
+
+        function updateStats(data) {
+            // Update General Information
+            document.getElementById('hostname').textContent = `Hostname: ${data.hostname}`;
+            document.getElementById('uptime_output').textContent = `Uptime: ${data.uptime_output}`;
+            document.getElementById('os_release').textContent = `OS: ${data.os_release}`;
+            document.getElementById('kernel_version').textContent = `Kernel: ${data.kernel_version}`;
+            document.getElementById('logged_in_users').textContent = `Logged-in Users: ${data.logged_in_users}`;
+
+            // Update CPU Information
+            document.getElementById('cpu_info').textContent = `Model: ${data.cpu_info}`;
+            document.getElementById('cpu_frequency').textContent = `Frequency: ${data.cpu_frequency}`;
+            document.getElementById('load_avg').textContent = `Load Avg: ${data.load_avg}`;
+
+            // Update CPU Utilization Bar
+            updateUtilizationBar(
+                document.getElementById('cpu_utilization_fill'),
+                document.getElementById('cpu_utilization_text'),
+                data.cpu_utilization
+            );
+
+            // Update Memory Utilization Bar
+            updateUtilizationBar(
+                document.getElementById('memory_utilization_fill'),
+                document.getElementById('memory_utilization_text'),
+                data.memory_utilization
+            );
+
+            // Update Swap Utilization Bar
+            updateUtilizationBar(
+                document.getElementById('swap_utilization_fill'),
+                document.getElementById('swap_utilization_text'),
+                data.swap_utilization
+            );
+
+            // Update Disk Utilization Bar
+            updateUtilizationBar(
+                document.getElementById('disk_utilization_fill'),
+                document.getElementById('disk_utilization_text'),
+                data.disk_utilization
+            );
+
+            // Update Network Utilization Bar
+            const totalNetwork = data.network_utilization.upload + data.network_utilization.download;
+            const maxNetworkSpeed = 10000; // Adjust based on your network capacity
+            updateUtilizationBar(
+                document.getElementById('network_utilization_fill'),
+                document.getElementById('network_utilization_text'),
+                totalNetwork,
+                'KB/s',
+                maxNetworkSpeed
+            );
+
+            // Update Network Information
+            document.getElementById('network_info').textContent = data.network_info;
+            document.getElementById('disk_read_write').textContent = `Disk I/O - Read: ${data.disk_read}, Write: ${data.disk_write}`;
+
+            // Update Network Connections
+            document.getElementById('network_connections').textContent = data.network_connections;
+
+            // Update Process List
+            const processList = data.process_list.map(function(proc) {
+                return `PID: ${proc.pid}, Name: ${proc.name}, CPU%: ${proc.cpu_percent.toFixed(1)}, MEM%: ${proc.memory_percent.toFixed(1)}`;
+            }).join('\n');
+            document.getElementById('process_list').textContent = processList;
+
+            // Update Service Statuses
+            const serviceListElement = document.getElementById('service_list');
+            serviceListElement.innerHTML = ''; // Clear existing services
+            for (const [serviceName, status] of Object.entries(data.service_status)) {
+                const serviceElement = document.createElement('div');
+                serviceElement.className = 'service-status';
+                serviceElement.innerHTML = `
+                    <div>${serviceName}</div>
+                    <span>${status
+                        ? '<span class="status-green"><i class="fas fa-check-circle"></i></span>'
+                        : '<span class="status-red"><i class="fas fa-times-circle"></i></span>'}</span>
+                `;
+                serviceListElement.appendChild(serviceElement);
+            }
+
+            // Update Last Updated Time
+            document.getElementById('last_updated').textContent = `Last updated: ${data.current_time}`;
+
+            // Update Charts
+            updateCharts(data);
+        }
+
+        function updateCharts(data) {
+            // Update CPU Chart
+            if (!cpuChart) {
+                const ctx = document.getElementById('cpu_chart').getContext('2d');
+                cpuChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.per_cpu_utilization.map(function(_, index) { return 'CPU ' + index; }),
+                        datasets: [{
+                            label: 'Per CPU Utilization (%)',
+                            data: data.per_cpu_utilization,
+                            backgroundColor: data.per_cpu_utilization.map(function(value) {
+                                return value < 50 ? '#28a745' : value < 75 ? '#ffc107' : '#dc3545';
+                            }),
+                            borderColor: '#58A6FF',
+                            borderWidth: 1,
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: { beginAtZero: true, max: 100 }
+                        },
+                        plugins: {
+                            legend: { display: false }
+                        }
+                    }
+                });
+            } else {
+                cpuChart.data.datasets[0].data = data.per_cpu_utilization;
+                cpuChart.data.datasets[0].backgroundColor = data.per_cpu_utilization.map(function(value) {
+                    return value < 50 ? '#28a745' : value < 75 ? '#ffc107' : '#dc3545';
+                });
+                cpuChart.update();
+            }
+
+            // Update Network Chart
+            const currentTime = new Date().toLocaleTimeString();
+            networkLabels.push(currentTime);
+            networkUploadHistory.push(data.network_utilization.upload);
+            networkDownloadHistory.push(data.network_utilization.download);
+
+            if (networkLabels.length > 20) {
+                networkLabels.shift();
+                networkUploadHistory.shift();
+                networkDownloadHistory.shift();
+            }
+
+            if (!networkChart) {
+                const ctx = document.getElementById('network_chart').getContext('2d');
+                networkChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: networkLabels,
+                        datasets: [
+                            {
+                                label: 'Upload (KB/s)',
+                                data: networkUploadHistory,
+                                backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                                borderColor: '#28a745',
+                                fill: true,
+                            },
+                            {
+                                label: 'Download (KB/s)',
+                                data: networkDownloadHistory,
+                                backgroundColor: 'rgba(88, 166, 255, 0.2)',
+                                borderColor: '#58A6FF',
+                                fill: true,
+                            }
+                        ]
+                    },
+                    options: {
+                        scales: {
+                            y: { beginAtZero: true },
+                            x: { display: true }
+                        },
+                        plugins: {
+                            legend: { display: true }
+                        }
+                    }
+                });
+            } else {
+                networkChart.data.labels = networkLabels;
+                networkChart.data.datasets[0].data = networkUploadHistory;
+                networkChart.data.datasets[1].data = networkDownloadHistory;
+                networkChart.update();
+            }
+        }
+
+        let ws;
+
+        function startWebSocket() {
+            const ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
+            const ws_path = ws_scheme + "://" + window.location.host + "/ws";
+            ws = new WebSocket(ws_path);
+
+            ws.onopen = function() {
+                console.log('WebSocket connection established');
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                updateStats(data);
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket connection closed');
+                // Try to reconnect after a delay
+                setTimeout(startWebSocket, 5000);
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                ws.close();
+            };
+        }
+    </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html_content)
 
 def open_browser():
     """Open the default web browser to the application's page."""
     url = "http://127.0.0.1:8003"
     try:
         webbrowser.open(url, new=2)  # new=2 opens in a new tab, if possible
-        logger.info(f"Opened web browser to {url}")
     except Exception as e:
-        logger.error(f"Failed to open browser: {e}")
+        print(f"Failed to open browser: {e}")
 
 if __name__ == "__main__":
     import uvicorn
+    import threading
 
     # Start the web server in a separate thread
     def start_server():
         uvicorn.run(app, host="127.0.0.1", port=8003, log_level="info")
 
-    server_thread = threading.Thread(target=start_server, daemon=True)
+    server_thread = threading.Thread(target=start_server)
     server_thread.start()
 
     # Give the server a moment to start
-    asyncio.run(asyncio.sleep(1))
+    asyncio.sleep(1)
 
     # Open the web browser
     open_browser()
 
-    # Keep the main thread alive to keep the server running
-    try:
-        while True:
-            asyncio.run(asyncio.sleep(3600))  # Sleep for 1 hour intervals
-    except KeyboardInterrupt:
-        logger.info("Shutting down server...")
+    # Wait for the server thread to finish
+    server_thread.join()
+
