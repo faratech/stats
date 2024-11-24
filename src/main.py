@@ -1,4 +1,3 @@
-[root@windowsforum-test src]# cat main.py
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 import asyncio
