@@ -30,19 +30,6 @@ async def initialize_static_data():
     static_data['hostname'] = socket.gethostname()
     static_data['cpu_frequency'] = get_cpu_frequency()
     static_data['logged_in_users'] = get_logged_in_users()
-    static_data['is_exchange_server'] = is_exchange_server()
-
-def is_exchange_server():
-    """
-    Determines if the current server is an Exchange Server by checking
-    the status of the Microsoft Exchange Transport Service.
-    """
-    exchange_service = 'MSExchangeTransport'
-    try:
-        status = win32serviceutil.QueryServiceStatus(exchange_service)[1]
-        return status == win32service.SERVICE_RUNNING
-    except Exception:
-        return False  # Service not found or other error
 
 def get_logged_in_users():
     try:
@@ -50,6 +37,13 @@ def get_logged_in_users():
         return len(users)
     except Exception:
         return 0
+
+def get_logged_in_user_names():
+    try:
+        users = psutil.users()
+        return [user.name for user in users]
+    except Exception:
+        return []
 
 # Function to check service status on Windows
 async def get_service_status():
@@ -342,6 +336,9 @@ async def collect_stats(previous_net_io):
         # Get service statuses
         service_status = await get_service_status()
 
+        # Get Exchange-specific service statuses
+        exchange_services_status = get_exchange_service_status()
+
         # Get utilization data using psutil
         cpu_utilization = psutil.cpu_percent(interval=0)
         per_cpu_utilization = psutil.cpu_percent(interval=0, percpu=True)
@@ -407,6 +404,11 @@ async def collect_stats(previous_net_io):
         # Current time
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # Collect Exchange-specific data
+        exchange_logs = get_exchange_send_receive_logs(num_lines=10)
+        event_logs = get_event_logs(log_type='Application', event_levels=['Critical', 'Error', 'Warning'], num_events=10)
+        security_logins = get_security_logins(num_events=10)
+
         # Package all stats into a dictionary
         stats = {
             'cpu_utilization': cpu_utilization,
@@ -416,6 +418,7 @@ async def collect_stats(previous_net_io):
             'disk_utilization': disk_utilization,
             'network_utilization': network_utilization,
             'service_status': service_status,
+            'exchange_services_status': exchange_services_status,
             'current_time': current_time,
             'uptime_output': uptime_output,
             'process_list': processes_sorted,  # Send as list of dicts
@@ -424,23 +427,15 @@ async def collect_stats(previous_net_io):
             'disk_read': disk_read,
             'disk_write': disk_write,
             'load_avg': load_avg_str,
-            'current_net_io': net_io  # Include for next iteration
+            'current_net_io': net_io,  # Include for next iteration
+            'exchange_logs': exchange_logs,
+            'event_logs': event_logs,
+            'security_logins': security_logins,
+            'logged_in_users': get_logged_in_user_names(),
         }
 
         # Combine static data and dynamic stats
         stats.update(static_data)
-
-        if static_data.get('is_exchange_server'):
-            # Collect Exchange-specific data
-            exchange_services_status = get_exchange_service_status()
-            exchange_logs = get_exchange_send_receive_logs(num_lines=10)
-            event_logs = get_event_logs(log_type='Application', event_levels=['Critical', 'Error', 'Warning'], num_events=10)
-            security_logins = get_security_logins(num_events=10)
-            # Add to stats
-            stats['exchange_services_status'] = exchange_services_status
-            stats['exchange_logs'] = exchange_logs
-            stats['event_logs'] = event_logs
-            stats['security_logins'] = security_logins
 
         return stats
     except Exception as e:
@@ -469,10 +464,8 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     await initialize_static_data()  # Ensure static data is initialized
-    page_title = "System Monitor"
-    if static_data.get('is_exchange_server'):
-        page_title = "Exchange Monitoring System"
-    return templates.TemplateResponse("index.html", {"request": request, "page_title": page_title, "is_exchange_server": static_data.get('is_exchange_server')})
+    page_title = "Exchange Monitoring System"
+    return templates.TemplateResponse("index.html", {"request": request, "page_title": page_title})
 
 def open_browser():
     """Open the default web browser to the application's page."""

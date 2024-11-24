@@ -24,7 +24,6 @@
             padding: 10px 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.5);
         }
-        .navbar img { height: 40px; }
         .navbar h1 {
             color: #58A6FF;
             margin: 0;
@@ -234,8 +233,6 @@
                 </div>
 
                 <!-- Exchange-specific Cards -->
-                {% if is_exchange_server %}
-                <!-- The following sections will be displayed if the server is an Exchange Server -->
                 <!-- Exchange Services Card -->
                 <div class="card" id="exchange_services_card">
                     <h3><i class="fas fa-server"></i> Exchange Services</h3>
@@ -263,7 +260,6 @@
                     <h3><i class="fas fa-user-shield"></i> Recent Logins</h3>
                     <pre id="security_logins"></pre>
                 </div>
-                {% endif %}
                 <!-- End of Exchange-specific Cards -->
 
             </div>
@@ -348,8 +344,9 @@
             if (previousData.kernel_version !== data.kernel_version) {
                 document.getElementById('kernel_version').textContent = `Kernel: ${data.kernel_version}`;
             }
-            if (previousData.logged_in_users !== data.logged_in_users) {
-                document.getElementById('logged_in_users').textContent = `Logged-in Users: ${data.logged_in_users}`;
+            if (JSON.stringify(previousData.logged_in_users) !== JSON.stringify(data.logged_in_users)) {
+                document.getElementById('logged_in_users').textContent = `Logged-in Users: ${data.logged_in_users.join(', ')}`;
+                highlightChanges('general_info_card');
             }
 
             // Update CPU Information
@@ -443,69 +440,63 @@
                 highlightChanges('services_card');
             }
 
+            // Update Exchange Services Statuses
+            const exchangeServiceListElement = document.getElementById('exchange_service_list');
+            if (JSON.stringify(previousData.exchange_services_status) !== JSON.stringify(data.exchange_services_status)) {
+                exchangeServiceListElement.innerHTML = ''; // Clear existing services
+                for (const [serviceName, status] of Object.entries(data.exchange_services_status)) {
+                    const serviceElement = document.createElement('div');
+                    serviceElement.className = 'service-status';
+                    serviceElement.innerHTML = `
+                        <div>${serviceName}</div>
+                        <span>${status
+                            ? '<span class="status-green"><i class="fas fa-check-circle"></i></span>'
+                            : '<span class="status-red"><i class="fas fa-times-circle"></i></span>'}</span>
+                    `;
+                    exchangeServiceListElement.appendChild(serviceElement);
+                }
+                highlightChanges('exchange_services_card');
+            }
+
+            // Update Exchange Logs
+            const exchangeLogsContent = `--- Send Logs ---\n${data.exchange_logs.send_log.join('\n')}\n\n--- Receive Logs ---\n${data.exchange_logs.receive_log.join('\n')}`;
+            if (previousData.exchange_logs_content !== exchangeLogsContent) {
+                document.getElementById('exchange_logs').textContent = exchangeLogsContent;
+                highlightChanges('exchange_logs_card');
+            }
+
+            // Update Exchange Shell Output
+            // Placeholder for future Exchange shell outputs
+            // document.getElementById('exchange_shell_output').textContent = data.exchange_shell_output;
+
+            // Update Event Logs
+            const eventLogsContent = data.event_logs.map(event => {
+                return `[${event.TimeGenerated}] ${event.SourceName} (Event ID: ${event.EventID})\n${event.StringInserts ? event.StringInserts.join('\n') : ''}\n`;
+            }).join('\n');
+            if (previousData.event_logs_content !== eventLogsContent) {
+                document.getElementById('event_logs').textContent = eventLogsContent;
+                highlightChanges('event_logs_card');
+            }
+
+            // Update Security Logins
+            const securityLoginsContent = data.security_logins.map(event => {
+                return `[${event.TimeGenerated}] ${event.SourceName} (Event ID: ${event.EventID})\n${event.StringInserts ? event.StringInserts.join('\n') : ''}\n`;
+            }).join('\n');
+            if (previousData.security_logins_content !== securityLoginsContent) {
+                document.getElementById('security_logins').textContent = securityLoginsContent;
+                highlightChanges('security_logins_card');
+            }
+
             // Update Last Updated Time
             document.getElementById('last_updated').textContent = `Last updated: ${data.current_time}`;
 
             // Update Charts
             updateCharts(data);
 
-            // Check if the server is an Exchange Server
-            if (data.is_exchange_server === true || data.is_exchange_server === 'True') {
-                // Update Exchange Services
-                const exchangeServiceListElement = document.getElementById('exchange_service_list');
-                if (JSON.stringify(previousData.exchange_services_status) !== JSON.stringify(data.exchange_services_status)) {
-                    exchangeServiceListElement.innerHTML = ''; // Clear existing services
-                    for (const [serviceName, status] of Object.entries(data.exchange_services_status)) {
-                        const serviceElement = document.createElement('div');
-                        serviceElement.className = 'service-status';
-                        serviceElement.innerHTML = `
-                            <div>${serviceName}</div>
-                            <span>${status
-                                ? '<span class="status-green"><i class="fas fa-check-circle"></i></span>'
-                                : '<span class="status-red"><i class="fas fa-times-circle"></i></span>'}</span>
-                        `;
-                        exchangeServiceListElement.appendChild(serviceElement);
-                    }
-                    highlightChanges('exchange_services_card');
-                }
-
-                // Update Exchange Logs
-                const exchangeLogsContent = `--- Send Logs ---\n${data.exchange_logs.send_log.join('\n')}\n\n--- Receive Logs ---\n${data.exchange_logs.receive_log.join('\n')}`;
-                if (previousData.exchange_logs_content !== exchangeLogsContent) {
-                    document.getElementById('exchange_logs').textContent = exchangeLogsContent;
-                    highlightChanges('exchange_logs_card');
-                }
-
-                // Update Exchange Shell Output
-                if (previousData.exchange_shell_output !== data.exchange_shell_output) {
-                    document.getElementById('exchange_shell_output').textContent = data.exchange_shell_output;
-                    highlightChanges('exchange_shell_output_card');
-                }
-
-                // Update Event Logs
-                const eventLogsContent = data.event_logs.map(event => {
-                    return `[${event.TimeGenerated}] ${event.SourceName} (Event ID: ${event.EventID})\n${event.StringInserts ? event.StringInserts.join('\n') : ''}\n`;
-                }).join('\n');
-                if (previousData.event_logs_content !== eventLogsContent) {
-                    document.getElementById('event_logs').textContent = eventLogsContent;
-                    highlightChanges('event_logs_card');
-                }
-
-                // Update Security Logins
-                const securityLoginsContent = data.security_logins.map(event => {
-                    return `[${event.TimeGenerated}] ${event.SourceName} (Event ID: ${event.EventID})\n${event.StringInserts ? event.StringInserts.join('\n') : ''}\n`;
-                }).join('\n');
-                if (previousData.security_logins_content !== securityLoginsContent) {
-                    document.getElementById('security_logins').textContent = securityLoginsContent;
-                    highlightChanges('security_logins_card');
-                }
-
-                // Store contents for comparison in next update
-                previousData.exchange_logs_content = exchangeLogsContent;
-                previousData.event_logs_content = eventLogsContent;
-                previousData.security_logins_content = securityLoginsContent;
-                previousData.exchange_shell_output = data.exchange_shell_output;
-            }
+            // Store contents for comparison in next update
+            previousData.exchange_logs_content = exchangeLogsContent;
+            previousData.event_logs_content = eventLogsContent;
+            previousData.security_logins_content = securityLoginsContent;
 
             // Update previousData
             previousData = data;
