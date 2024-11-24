@@ -14,13 +14,28 @@ import subprocess
 import webbrowser
 import win32evtlog
 import threading
+import logging
 
 app = FastAPI()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler("exchange_monitoring.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Cache for static data
 static_data = {}
 
-templates = Jinja2Templates(directory="templates")
+# Set up the templates directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+templates_dir = os.path.join(current_dir, "templates")
+templates = Jinja2Templates(directory=templates_dir)
 
 # Initialize static data that doesn't change frequently
 async def initialize_static_data():
@@ -40,15 +55,21 @@ def is_exchange_server():
     exchange_service = 'MSExchangeTransport'
     try:
         status = win32serviceutil.QueryServiceStatus(exchange_service)[1]
-        return status == win32service.SERVICE_RUNNING
-    except Exception:
+        is_running = status == win32service.SERVICE_RUNNING
+        logger.info(f"Exchange Service '{exchange_service}' running: {is_running}")
+        return is_running
+    except Exception as e:
+        logger.error(f"Error checking Exchange service '{exchange_service}': {e}")
         return False  # Service not found or other error
 
 def get_logged_in_users():
     try:
         users = psutil.users()
-        return len(users)
-    except Exception:
+        user_count = len(users)
+        logger.info(f"Logged-in users count: {user_count}")
+        return user_count
+    except Exception as e:
+        logger.error(f"Error retrieving logged-in users: {e}")
         return 0
 
 # Function to check service status on Windows
@@ -57,7 +78,6 @@ async def get_service_status():
     Checks the status of critical Windows services.
     Returns a dictionary with service display names and their running status.
     """
-    # List of critical Windows services to monitor
     services = {
         'Spooler': 'Print Spooler',
         'W32Time': 'Windows Time',
@@ -126,28 +146,74 @@ async def get_service_status():
         try:
             status = win32serviceutil.QueryServiceStatus(service_name)[1]
             service_status[display_name] = (status == win32service.SERVICE_RUNNING)
-        except Exception:
+            logger.debug(f"Service '{display_name}' running: {service_status[display_name]}")
+        except Exception as e:
             service_status[display_name] = False
+            logger.warning(f"Error querying service '{display_name}': {e}")
     return service_status
+
+def get_exchange_installation_path():
+    """
+    Determines the installation directory of Microsoft Exchange by querying the MSExchangeTransport service.
+    Returns the installation path if found, else None.
+    """
+    try:
+        service_name = 'MSExchangeTransport'
+        config = win32serviceutil.QueryServiceConfig(service_name)
+        
+        # The binary path may contain quotes and command-line arguments
+        binary_path = config[3]
+        if '"' in binary_path:
+            exe_path = binary_path.split('"')[1]
+        else:
+            exe_path = binary_path.split(' ')[0]
+        
+        # Assuming the binary is located in the 'Bin' directory under the installation path
+        # e.g., 'C:\Program Files\Microsoft\Exchange Server\V15\Bin\MSExchangeTransport.exe'
+        bin_dir = os.path.dirname(exe_path)
+        install_dir = os.path.dirname(bin_dir)
+        
+        if os.path.exists(install_dir):
+            logger.info(f"Exchange installation directory found: {install_dir}")
+            return install_dir
+        else:
+            logger.error(f"Exchange installation directory does not exist: {install_dir}")
+            return None
+    except Exception as e:
+        logger.error(f"Error finding Exchange installation path: {e}")
+        return None
 
 def get_exchange_send_receive_logs(num_lines=10):
     """
-    Retrieves the latest send and receive logs from Exchange Transport Logs.
+    Retrieves the latest send and receive logs from Exchange Transport Logs by dynamically determining the log paths.
     """
     logs = {}
-    send_log_path = r'C:\Program Files\Microsoft\Exchange Server\V15\TransportRoles\Logs\ProtocolLog\SmtpSend'
-    receive_log_path = r'C:\Program Files\Microsoft\Exchange Server\V15\TransportRoles\Logs\ProtocolLog\SmtpReceive'
+    install_dir = get_exchange_installation_path()
+    
+    if not install_dir:
+        logger.error("Exchange installation path not found. Cannot retrieve send/receive logs.")
+        logs['send_log'] = []
+        logs['receive_log'] = []
+        return logs
+    
+    send_log_path = os.path.join(install_dir, 'TransportRoles', 'Logs', 'ProtocolLog', 'SmtpSend')
+    receive_log_path = os.path.join(install_dir, 'TransportRoles', 'Logs', 'ProtocolLog', 'SmtpReceive')
 
     # Get the latest log file in the directory
     def get_latest_log(log_dir):
         try:
+            if not os.path.exists(log_dir):
+                logger.error(f"Log directory does not exist: {log_dir}")
+                return None
             files = [os.path.join(log_dir, f) for f in os.listdir(log_dir) if os.path.isfile(os.path.join(log_dir, f))]
             if not files:
+                logger.warning(f"No log files found in directory: {log_dir}")
                 return None
             latest_file = max(files, key=os.path.getmtime)
+            logger.debug(f"Latest log file in '{log_dir}': {latest_file}")
             return latest_file
         except Exception as e:
-            print(f"Error accessing log directory {log_dir}: {e}")
+            logger.error(f"Error accessing log directory {log_dir}: {e}")
             return None
 
     send_log_file = get_latest_log(send_log_path)
@@ -165,7 +231,8 @@ def get_exchange_send_receive_logs(num_lines=10):
                     f.seek(pointer)
                     new_byte = f.read(1)
                     if new_byte == b'\n':
-                        lines.insert(0, buffer.decode('utf-8', errors='replace')[::-1])
+                        line = buffer.decode('utf-8', errors='replace')[::-1]
+                        lines.insert(0, line)
                         buffer = bytearray()
                     else:
                         buffer.extend(new_byte)
@@ -174,7 +241,7 @@ def get_exchange_send_receive_logs(num_lines=10):
                     lines.insert(0, buffer.decode('utf-8', errors='replace')[::-1])
                 return lines[-num_lines:]
         except Exception as e:
-            print(f"Error reading file {file_path}: {e}")
+            logger.error(f"Error reading file {file_path}: {e}")
             return []
 
     if send_log_file:
@@ -193,10 +260,11 @@ def get_event_logs(log_type='Application', event_levels=['Critical', 'Error', 'W
     """
     Retrieves recent event logs based on specified criteria.
     """
-    log_handle = win32evtlog.OpenEventLog(None, log_type)
-    flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-    events = []
+    formatted_events = []
     try:
+        log_handle = win32evtlog.OpenEventLog(None, log_type)
+        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        events = []
         while len(events) < num_events:
             records = win32evtlog.ReadEventLog(log_handle, flags, 0)
             if not records:
@@ -217,32 +285,36 @@ def get_event_logs(log_type='Application', event_levels=['Critical', 'Error', 'W
                     event_level = 'Audit Success'
                 if event_level in event_levels:
                     events.append(event)
+        # Format the events
+        for event in events:
+            record = {
+                'SourceName': event.SourceName,
+                'EventID': event.EventID & 0xFFFF,  # Masking to get the actual EventID
+                'EventType': event.EventType,
+                'TimeGenerated': event.TimeGenerated.Format(),
+                'EventCategory': event.EventCategory,
+                'StringInserts': event.StringInserts
+            }
+            formatted_events.append(record)
+        logger.info(f"Retrieved {len(formatted_events)} event logs from '{log_type}'")
     except Exception as e:
-        print(f"Error reading event logs: {e}")
+        logger.error(f"Error reading event logs: {e}")
     finally:
-        win32evtlog.CloseEventLog(log_handle)
-    # Format the events
-    formatted_events = []
-    for event in events:
-        record = {
-            'SourceName': event.SourceName,
-            'EventID': event.EventID & 0xFFFF,  # Masking to get the actual EventID
-            'EventType': event.EventType,
-            'TimeGenerated': event.TimeGenerated.Format(),
-            'EventCategory': event.EventCategory,
-            'StringInserts': event.StringInserts
-        }
-        formatted_events.append(record)
+        try:
+            win32evtlog.CloseEventLog(log_handle)
+        except:
+            pass
     return formatted_events
 
 def get_security_logins(num_events=10):
     """
     Retrieves recent security login events.
     """
-    log_handle = win32evtlog.OpenEventLog(None, 'Security')
-    flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-    events = []
+    formatted_events = []
     try:
+        log_handle = win32evtlog.OpenEventLog(None, 'Security')
+        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        events = []
         while len(events) < num_events:
             records = win32evtlog.ReadEventLog(log_handle, flags, 0)
             if not records:
@@ -252,20 +324,23 @@ def get_security_logins(num_events=10):
                     break
                 if event.EventID & 0xFFFF == 4624:  # Logon event
                     events.append(event)
+        # Format the events
+        for event in events:
+            record = {
+                'SourceName': event.SourceName,
+                'EventID': event.EventID & 0xFFFF,  # Masking to get the actual EventID
+                'TimeGenerated': event.TimeGenerated.Format(),
+                'StringInserts': event.StringInserts
+            }
+            formatted_events.append(record)
+        logger.info(f"Retrieved {len(formatted_events)} security login events")
     except Exception as e:
-        print(f"Error reading security logs: {e}")
+        logger.error(f"Error reading security logs: {e}")
     finally:
-        win32evtlog.CloseEventLog(log_handle)
-    # Format the events
-    formatted_events = []
-    for event in events:
-        record = {
-            'SourceName': event.SourceName,
-            'EventID': event.EventID & 0xFFFF,  # Masking to get the actual EventID
-            'TimeGenerated': event.TimeGenerated.Format(),
-            'StringInserts': event.StringInserts
-        }
-        formatted_events.append(record)
+        try:
+            win32evtlog.CloseEventLog(log_handle)
+        except:
+            pass
     return formatted_events
 
 def get_exchange_service_status():
@@ -296,8 +371,10 @@ def get_exchange_service_status():
         try:
             status = win32serviceutil.QueryServiceStatus(service_name)[1]
             service_status[display_name] = (status == win32service.SERVICE_RUNNING)
-        except Exception:
+            logger.debug(f"Exchange Service '{display_name}' running: {service_status[display_name]}")
+        except Exception as e:
             service_status[display_name] = False
+            logger.warning(f"Error querying Exchange service '{display_name}': {e}")
     return service_status
 
 # Function to get network connections
@@ -305,9 +382,9 @@ def get_network_connections():
     """
     Retrieves current network connections.
     """
+    formatted_connections = []
     try:
         connections = psutil.net_connections(kind='inet')
-        formatted_connections = []
         for conn in connections:
             laddr = f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else ""
             raddr = f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else ""
@@ -317,31 +394,57 @@ def get_network_connections():
                 'raddr': raddr,
                 'status': conn.status
             })
-        return formatted_connections
-    except Exception:
-        return []
+        logger.info(f"Retrieved {len(formatted_connections)} network connections")
+    except Exception as e:
+        logger.error(f"Error retrieving network connections: {e}")
+    return formatted_connections
 
 # Function to get CPU info
 def get_cpu_info():
     try:
-        return platform.processor()
-    except Exception:
+        cpu_info = platform.processor()
+        logger.debug(f"CPU Info: {cpu_info}")
+        return cpu_info
+    except Exception as e:
+        logger.error(f"Error retrieving CPU info: {e}")
         return "N/A"
 
 # Function to get CPU frequency
 def get_cpu_frequency():
     try:
         cpu_freq = psutil.cpu_freq()
-        return f"{cpu_freq.current:.2f} MHz" if cpu_freq else "N/A"
-    except Exception:
+        freq = f"{cpu_freq.current:.2f} MHz" if cpu_freq else "N/A"
+        logger.debug(f"CPU Frequency: {freq}")
+        return freq
+    except Exception as e:
+        logger.error(f"Error retrieving CPU frequency: {e}")
         return "N/A"
 
 # Function to collect stats
 async def collect_stats(previous_net_io):
+    stats = {}
     try:
         # Get service statuses
         service_status = await get_service_status()
+        stats['service_status'] = service_status
+    except Exception as e:
+        logger.error(f"Failed to get service statuses: {e}")
+        stats['service_status'] = {}
 
+    # Determine if it's an Exchange server
+    is_exchange = static_data.get('is_exchange_server', False)
+    stats['is_exchange_server'] = is_exchange
+
+    if is_exchange:
+        try:
+            # Get Exchange-specific service statuses
+            exchange_services_status = get_exchange_service_status()
+            stats['exchange_services_status'] = exchange_services_status
+        except Exception as e:
+            logger.error(f"Failed to get Exchange service statuses: {e}")
+            stats['exchange_services_status'] = {}
+
+    try:
         # Get utilization data using psutil
         cpu_utilization = psutil.cpu_percent(interval=0)
         per_cpu_utilization = psutil.cpu_percent(interval=0, percpu=True)
@@ -407,15 +510,29 @@ async def collect_stats(previous_net_io):
         # Current time
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # Collect Exchange-specific data if applicable
+        if is_exchange:
+            try:
+                exchange_logs = get_exchange_send_receive_logs(num_lines=10)
+                event_logs = get_event_logs(log_type='Application', event_levels=['Critical', 'Error', 'Warning'], num_events=10)
+                security_logins = get_security_logins(num_events=10)
+                stats['exchange_logs'] = exchange_logs
+                stats['event_logs'] = event_logs
+                stats['security_logins'] = security_logins
+            except Exception as e:
+                logger.error(f"Failed to collect Exchange-specific data: {e}")
+                stats['exchange_logs'] = []
+                stats['event_logs'] = []
+                stats['security_logins'] = []
+
         # Package all stats into a dictionary
-        stats = {
+        stats.update({
             'cpu_utilization': cpu_utilization,
             'per_cpu_utilization': per_cpu_utilization,
             'memory_utilization': memory_utilization,
             'swap_utilization': swap_utilization,
             'disk_utilization': disk_utilization,
             'network_utilization': network_utilization,
-            'service_status': service_status,
             'current_time': current_time,
             'uptime_output': uptime_output,
             'process_list': processes_sorted,  # Send as list of dicts
@@ -424,28 +541,37 @@ async def collect_stats(previous_net_io):
             'disk_read': disk_read,
             'disk_write': disk_write,
             'load_avg': load_avg_str,
-            'current_net_io': net_io  # Include for next iteration
-        }
+            'current_net_io': net_io,  # Include for next iteration
+        })
 
-        # Combine static data and dynamic stats
-        stats.update(static_data)
-
-        if static_data.get('is_exchange_server'):
-            # Collect Exchange-specific data
-            exchange_services_status = get_exchange_service_status()
-            exchange_logs = get_exchange_send_receive_logs(num_lines=10)
-            event_logs = get_event_logs(log_type='Application', event_levels=['Critical', 'Error', 'Warning'], num_events=10)
-            security_logins = get_security_logins(num_events=10)
-            # Add to stats
-            stats['exchange_services_status'] = exchange_services_status
-            stats['exchange_logs'] = exchange_logs
-            stats['event_logs'] = event_logs
-            stats['security_logins'] = security_logins
-
-        return stats
     except Exception as e:
-        print(f"Error collecting stats: {e}")
-        return {}
+        logger.error(f"Error collecting utilization and system stats: {e}")
+        # Set default or empty values
+        stats.update({
+            'cpu_utilization': 0,
+            'per_cpu_utilization': [],
+            'memory_utilization': 0,
+            'swap_utilization': 0,
+            'disk_utilization': 0,
+            'network_utilization': {'upload': 0, 'download': 0},
+            'current_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'uptime_output': "0h 0m 0s",
+            'process_list': [],
+            'network_info': "Upload: 0.00 KB/s, Download: 0.00 KB/s",
+            'network_connections': "",
+            'disk_read': "0 MB",
+            'disk_write': "0 MB",
+            'load_avg': "N/A",
+            'current_net_io': None,
+        })
+        if is_exchange:
+            stats.update({
+                'exchange_logs': [],
+                'event_logs': [],
+                'security_logins': [],
+            })
+
+    return stats
 
 # WebSocket endpoint to stream stats
 @app.websocket("/ws")
@@ -460,27 +586,36 @@ async def websocket_endpoint(websocket: WebSocket):
             await asyncio.sleep(1)  # Adjust the interval as needed
             previous_net_io = stats.get('current_net_io')
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket disconnected")
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}")
         await websocket.close()
 
 # Serve the HTML page
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    await initialize_static_data()  # Ensure static data is initialized
-    page_title = "System Monitor"
-    if static_data.get('is_exchange_server'):
-        page_title = "Exchange Monitoring System"
-    return templates.TemplateResponse("index.html", {"request": request, "page_title": page_title, "is_exchange_server": static_data.get('is_exchange_server')})
+    try:
+        await initialize_static_data()  # Ensure static data is initialized
+        page_title = "System Monitor"
+        if static_data.get('is_exchange_server'):
+            page_title = "Exchange Monitoring System"
+        return templates.TemplateResponse("index.html", {
+            "request": request,
+            "page_title": page_title,
+            "is_exchange_server": static_data.get('is_exchange_server')
+        })
+    except Exception as e:
+        logger.error(f"Error rendering template: {e}")
+        return HTMLResponse("<h1>Internal Server Error</h1>", status_code=500)
 
 def open_browser():
     """Open the default web browser to the application's page."""
     url = "http://127.0.0.1:8003"
     try:
         webbrowser.open(url, new=2)  # new=2 opens in a new tab, if possible
+        logger.info(f"Opened web browser to {url}")
     except Exception as e:
-        print(f"Failed to open browser: {e}")
+        logger.error(f"Failed to open browser: {e}")
 
 if __name__ == "__main__":
     import uvicorn
@@ -489,7 +624,7 @@ if __name__ == "__main__":
     def start_server():
         uvicorn.run(app, host="127.0.0.1", port=8003, log_level="info")
 
-    server_thread = threading.Thread(target=start_server)
+    server_thread = threading.Thread(target=start_server, daemon=True)
     server_thread.start()
 
     # Give the server a moment to start
@@ -498,5 +633,9 @@ if __name__ == "__main__":
     # Open the web browser
     open_browser()
 
-    # Wait for the server thread to finish
-    server_thread.join()
+    # Keep the main thread alive to keep the server running
+    try:
+        while True:
+            asyncio.run(asyncio.sleep(3600))  # Sleep for 1 hour intervals
+    except KeyboardInterrupt:
+        logger.info("Shutting down server...")
