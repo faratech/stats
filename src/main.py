@@ -8,7 +8,24 @@ import platform
 import socket
 import os
 
-app = FastAPI()
+app = FastAPI(
+    title="Stats App",
+    description="System Stats",
+    version="0.0.1",
+    contact={
+        "name": "Mike Fara",
+        "url": "https://windowsforum.com/contact-us",
+        "email": "admin@windowsforum.com",
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/",
+)
+
 
 # Cache for static data
 static_data = {}
