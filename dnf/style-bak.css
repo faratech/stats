@@ -1,0 +1,203 @@
+/* General styles */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    margin: 0;
+    padding: 0;
+    background-color: #f5f7fa;
+}
+
+header {
+    background-color: #2c3e50;
+    color: white;
+    padding: 1rem 2rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.8rem;
+}
+
+main {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+section {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+footer {
+    text-align: center;
+    padding: 1rem;
+    color: #7f8c8d;
+    font-size: 0.9rem;
+}
+
+/* Filter controls */
+.filter-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+}
+
+.filter-controls label {
+    font-weight: 500;
+}
+
+.filter-controls select,
+.filter-controls input {
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+/* Dashboard */
+.stats-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+    border-left: 4px solid #3498db;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+
+.stat-card h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: #7f8c8d;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #2c3e50;
+    margin-top: 0.5rem;
+}
+
+.chart-container {
+    height: 300px;
+    margin-bottom: 1rem;
+}
+
+/* Timeline */
+.timeline-section {
+    overflow: hidden;
+}
+
+#timeline {
+    width: 100%;
+    height: 400px;
+}
+
+/* Tables */
+table.display {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.dataTables_wrapper {
+    margin-top: 1rem;
+}
+
+/* Package detail */
+.package-detail {
+    position: relative;
+}
+
+#back-to-list {
+    position: absolute;
+    right: 1.5rem;
+    top: 1.5rem;
+    padding: 0.5rem 1rem;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.detail-timeline {
+    width: 100%;
+    height: 200px;
+    margin: 1rem 0 2rem;
+}
+
+/* Button styling */
+.view-details-btn {
+    padding: 0.4rem 0.8rem;
+    background: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.view-details-btn:hover {
+    background: #2980b9;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .stats-container {
+        grid-template-columns: 1fr;
+    }
+    
+    .filter-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .filter-controls > * {
+        width: 100%;
+    }
+}
+
+/* Event colors for timeline */
+.event-install { 
+    background-color: rgba(46, 204, 113, 0.8); 
+    border-color: #27ae60; 
+}
+
+.event-update { 
+    background-color: rgba(52, 152, 219, 0.8); 
+    border-color: #2980b9; 
+}
+
+.event-remove { 
+    background-color: rgba(231, 76, 60, 0.8); 
+    border-color: #c0392b; 
+}
+
+.event-downgrade { 
+    background-color: rgba(241, 196, 15, 0.8); 
+    border-color: #f39c12; 
+}
+
+.event-reinstall { 
+    background-color: rgba(155, 89, 182, 0.8); 
+    border-color: #8e44ad; 
+}
+
+.event-unknown { 
+    background-color: rgba(189, 195, 199, 0.8); 
+    border-color: #7f8c8d; 
+}
