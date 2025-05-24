@@ -43,7 +43,7 @@ async def initialize_static_data():
 async def get_service_status():
     services = {
         'lsws': 'LiteSpeed Web Server',
-        'mysql': 'MySQL (MariaDB)',
+        'mariadb': 'MySQL (MariaDB)',
         'aiapi': 'AI Apps Service (FastAPI)',
         'elasticsearch': 'Elasticsearch',
         'fastapi': 'FastAPI for XenForo Universal Search'
