@@ -146,6 +146,157 @@
         .sortable-ghost {
             opacity: 0.4;
         }
+        /* Process list styles (htop-like) */
+        .process-table {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            background-color: #0D1117;
+            padding: 5px;
+            border-radius: 4px;
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+            position: relative;
+        }
+        /* Custom scrollbar for process table */
+        .process-table::-webkit-scrollbar {
+            width: 8px;
+        }
+        .process-table::-webkit-scrollbar-track {
+            background: #161B22;
+            border-radius: 4px;
+        }
+        .process-table::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 4px;
+        }
+        .process-table::-webkit-scrollbar-thumb:hover {
+            background: #58A6FF;
+        }
+        .process-header {
+            display: flex;
+            background-color: #161B22;
+            color: #58A6FF;
+            font-weight: bold;
+            padding: 5px 0;
+            border-bottom: 1px solid #30363d;
+            margin-bottom: 2px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .process-header > div, .connection-header > div {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        .process-header > div:hover, .connection-header > div:hover {
+            color: #D69D85;
+        }
+        .sort-indicator {
+            position: absolute;
+            right: 2px;
+            font-size: 10px;
+        }
+        .process-row {
+            display: flex;
+            padding: 2px 0;
+            border-bottom: 1px solid #21262d;
+        }
+        .process-row:hover {
+            background-color: #161B22;
+        }
+        .process-pid {
+            flex: 0 0 60px;
+            color: #8B949E;
+            text-align: right;
+            padding-right: 10px;
+        }
+        .process-name {
+            flex: 1;
+            color: #C9D1D9;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding-right: 10px;
+        }
+        .process-cpu {
+            flex: 0 0 60px;
+            text-align: right;
+            padding-right: 10px;
+        }
+        .process-mem {
+            flex: 0 0 60px;
+            text-align: right;
+            padding-right: 10px;
+        }
+        /* CPU percentage colors */
+        .cpu-low { color: #28a745; }
+        .cpu-medium { color: #ffc107; }
+        .cpu-high { color: #ff6b6b; }
+        .cpu-critical { color: #dc3545; }
+        /* Memory percentage colors */
+        .mem-low { color: #3498db; }
+        .mem-medium { color: #9b59b6; }
+        .mem-high { color: #e74c3c; }
+        /* Connections table styles */
+        .connections-table {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 12px;
+            background-color: #0D1117;
+            padding: 5px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .connection-header {
+            display: flex;
+            background-color: #161B22;
+            color: #58A6FF;
+            font-weight: bold;
+            padding: 5px 0;
+            border-bottom: 1px solid #30363d;
+            margin-bottom: 2px;
+        }
+        .connection-row {
+            display: flex;
+            padding: 2px 0;
+            border-bottom: 1px solid #21262d;
+        }
+        .connection-row:hover {
+            background-color: #161B22;
+        }
+        .connection-proto {
+            flex: 0 0 50px;
+            color: #8B949E;
+            padding-right: 10px;
+        }
+        .connection-local {
+            flex: 1;
+            color: #58A6FF;
+            padding-right: 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .connection-remote {
+            flex: 1;
+            color: #C9D1D9;
+            padding-right: 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .connection-status {
+            flex: 0 0 100px;
+            padding-right: 10px;
+        }
+        /* Connection status colors */
+        .status-established { color: #28a745; }
+        .status-listen { color: #58A6FF; }
+        .status-time-wait { color: #ffc107; }
+        .status-close-wait { color: #ff6b6b; }
+        .status-syn-sent { color: #9b59b6; }
+        .status-syn-recv { color: #3498db; }
     </style>
 </head>
 <body>
@@ -185,6 +336,7 @@
                 <!-- Memory Utilization Card -->
                 <div class="card">
                     <h3><i class="fas fa-memory"></i> Memory</h3>
+                    <p id="memory_info" style="margin: 10px 0; font-size: 14px;"></p>
                     <div class="utilization-bar">
                         <div id="memory_utilization_fill" class="utilization-fill" style="width: 0%;"></div>
                         <div id="memory_utilization_text" class="utilization-text">0%</div>
@@ -245,12 +397,12 @@
                 <!-- Top Processes Card -->
                 <div class="card double-width">
                     <h3><i class="fas fa-tasks"></i> Top Processes</h3>
-                    <pre id="process_list"></pre>
+                    <div id="process_list" class="process-table"></div>
                 </div>
                 <!-- Network Connections Card -->
                 <div class="card full-width">
                     <h3><i class="fas fa-plug"></i> Active Connections</h3>
-                    <pre id="network_connections"></pre>
+                    <div id="network_connections" class="connections-table"></div>
                 </div>
             </div>
             <div class="footer" id="last_updated">
@@ -294,7 +446,11 @@
             fillElement.style.width = Math.min(percent, 100) + '%';
             const utilizationClass = getUtilizationClass(percent);
             fillElement.className = 'utilization-fill ' + utilizationClass;
-            textElement.textContent = `${value.toFixed(2)} ${unit}`;
+            if (typeof value === 'number') {
+                textElement.textContent = `${value.toFixed(2)} ${unit}`;
+            } else {
+                textElement.textContent = value;
+            }
             if (utilizationClass === 'yellow') {
                 textElement.style.color = '#000'; // Black text
             } else {
@@ -307,6 +463,198 @@
         let networkUploadHistory = [];
         let networkDownloadHistory = [];
         let networkLabels = [];
+        
+        // Sorting state
+        let processSortColumn = 'cpu'; // Default sort by CPU
+        let processSortOrder = 'desc';
+        let connectionSortColumn = 'status'; // Default sort by status
+        let connectionSortOrder = 'asc';
+        
+        // Store data for sorting
+        let currentProcessList = [];
+        let currentConnectionsList = [];
+        
+        function sortProcesses(column) {
+            if (processSortColumn === column) {
+                processSortOrder = processSortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                processSortColumn = column;
+                processSortOrder = column === 'name' ? 'asc' : 'desc';
+            }
+            renderProcessList();
+        }
+        
+        function sortConnections(column) {
+            if (connectionSortColumn === column) {
+                connectionSortOrder = connectionSortOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                connectionSortColumn = column;
+                connectionSortOrder = 'asc';
+            }
+            renderConnectionsList();
+        }
+        
+        function getSortedProcesses() {
+            return [...currentProcessList].sort((a, b) => {
+                let aVal, bVal;
+                switch (processSortColumn) {
+                    case 'pid':
+                        aVal = a.pid;
+                        bVal = b.pid;
+                        break;
+                    case 'name':
+                        aVal = a.name.toLowerCase();
+                        bVal = b.name.toLowerCase();
+                        break;
+                    case 'cpu':
+                        aVal = a.cpu_percent;
+                        bVal = b.cpu_percent;
+                        break;
+                    case 'mem':
+                        aVal = a.memory_percent;
+                        bVal = b.memory_percent;
+                        break;
+                }
+                
+                if (processSortColumn === 'name') {
+                    return processSortOrder === 'asc' ? 
+                        aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                } else {
+                    return processSortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+                }
+            });
+        }
+        
+        function getSortedConnections() {
+            return [...currentConnectionsList].sort((a, b) => {
+                let aVal, bVal;
+                switch (connectionSortColumn) {
+                    case 'proto':
+                        aVal = a.type;
+                        bVal = b.type;
+                        break;
+                    case 'local':
+                        aVal = a.laddr || '';
+                        bVal = b.laddr || '';
+                        break;
+                    case 'remote':
+                        aVal = a.raddr || '';
+                        bVal = b.raddr || '';
+                        break;
+                    case 'status':
+                        aVal = a.status;
+                        bVal = b.status;
+                        break;
+                }
+                
+                return connectionSortOrder === 'asc' ? 
+                    aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+            });
+        }
+        
+        function renderProcessList() {
+            const processContainer = document.getElementById('process_list');
+            const sortedProcesses = getSortedProcesses();
+            
+            // Create header with sort indicators
+            const header = `
+                <div class="process-header">
+                    <div class="process-pid" onclick="sortProcesses('pid')">
+                        PID${processSortColumn === 'pid' ? `<span class="sort-indicator">${processSortOrder === 'asc' ? '▲' : '▼'}</span>` : ''}
+                    </div>
+                    <div class="process-name" onclick="sortProcesses('name')">
+                        COMMAND${processSortColumn === 'name' ? `<span class="sort-indicator">${processSortOrder === 'asc' ? '▲' : '▼'}</span>` : ''}
+                    </div>
+                    <div class="process-cpu" onclick="sortProcesses('cpu')">
+                        CPU%${processSortColumn === 'cpu' ? `<span class="sort-indicator">${processSortOrder === 'asc' ? '▲' : '▼'}</span>` : ''}
+                    </div>
+                    <div class="process-mem" onclick="sortProcesses('mem')">
+                        MEM%${processSortColumn === 'mem' ? `<span class="sort-indicator">${processSortOrder === 'asc' ? '▲' : '▼'}</span>` : ''}
+                    </div>
+                </div>
+            `;
+            
+            // Create rows
+            const rows = sortedProcesses.map(proc => {
+                // Determine CPU color class
+                let cpuClass = 'cpu-low';
+                if (proc.cpu_percent >= 80) cpuClass = 'cpu-critical';
+                else if (proc.cpu_percent >= 50) cpuClass = 'cpu-high';
+                else if (proc.cpu_percent >= 20) cpuClass = 'cpu-medium';
+                
+                // Determine Memory color class
+                let memClass = 'mem-low';
+                if (proc.memory_percent >= 50) memClass = 'mem-high';
+                else if (proc.memory_percent >= 20) memClass = 'mem-medium';
+                
+                return `
+                    <div class="process-row">
+                        <div class="process-pid">${proc.pid}</div>
+                        <div class="process-name">${proc.name}</div>
+                        <div class="process-cpu ${cpuClass}">${proc.cpu_percent.toFixed(1)}</div>
+                        <div class="process-mem ${memClass}">${proc.memory_percent.toFixed(1)}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            processContainer.innerHTML = header + rows;
+            
+            // Add process count info
+            const processCount = sortedProcesses.length;
+            if (processCount > 0) {
+                const countInfo = document.createElement('div');
+                countInfo.style.cssText = 'position: absolute; bottom: 5px; right: 15px; font-size: 11px; color: #8B949E;';
+                countInfo.textContent = `${processCount} processes`;
+                processContainer.appendChild(countInfo);
+            }
+        }
+        
+        function renderConnectionsList() {
+            const connectionsContainer = document.getElementById('network_connections');
+            const sortedConnections = getSortedConnections();
+            
+            // Create header with sort indicators
+            const connHeader = `
+                <div class="connection-header">
+                    <div class="connection-proto" onclick="sortConnections('proto')">
+                        PROTO${connectionSortColumn === 'proto' ? `<span class="sort-indicator">${connectionSortOrder === 'asc' ? '▲' : '▼'}</span>` : ''}
+                    </div>
+                    <div class="connection-local" onclick="sortConnections('local')">
+                        LOCAL ADDRESS${connectionSortColumn === 'local' ? `<span class="sort-indicator">${connectionSortOrder === 'asc' ? '▲' : '▼'}</span>` : ''}
+                    </div>
+                    <div class="connection-remote" onclick="sortConnections('remote')">
+                        REMOTE ADDRESS${connectionSortColumn === 'remote' ? `<span class="sort-indicator">${connectionSortOrder === 'asc' ? '▲' : '▼'}</span>` : ''}
+                    </div>
+                    <div class="connection-status" onclick="sortConnections('status')">
+                        STATE${connectionSortColumn === 'status' ? `<span class="sort-indicator">${connectionSortOrder === 'asc' ? '▲' : '▼'}</span>` : ''}
+                    </div>
+                </div>
+            `;
+            
+            // Create rows
+            const connRows = sortedConnections.map(conn => {
+                // Determine status color class
+                let statusClass = '';
+                const status = conn.status.toLowerCase();
+                if (status === 'established') statusClass = 'status-established';
+                else if (status === 'listen') statusClass = 'status-listen';
+                else if (status === 'time_wait') statusClass = 'status-time-wait';
+                else if (status === 'close_wait') statusClass = 'status-close-wait';
+                else if (status === 'syn_sent') statusClass = 'status-syn-sent';
+                else if (status === 'syn_recv') statusClass = 'status-syn-recv';
+                
+                return `
+                    <div class="connection-row">
+                        <div class="connection-proto">${conn.type.replace('SOCK_', '')}</div>
+                        <div class="connection-local">${conn.laddr || '-'}</div>
+                        <div class="connection-remote">${conn.raddr || '-'}</div>
+                        <div class="connection-status ${statusClass}">${conn.status}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            connectionsContainer.innerHTML = connHeader + connRows;
+        }
 
         function updateStats(data) {
             // Update General Information
@@ -327,6 +675,13 @@
                 document.getElementById('cpu_utilization_text'),
                 data.cpu_utilization
             );
+
+            // Update Memory Info
+            document.getElementById('memory_info').innerHTML = `
+                <span style="color: #58A6FF;">Total:</span> ${data.memory_total_gb.toFixed(2)} GB | 
+                <span style="color: #28a745;">Available:</span> ${data.memory_available_gb.toFixed(2)} GB | 
+                <span style="color: #dc3545;">Used:</span> ${data.memory_used_gb.toFixed(2)} GB
+            `;
 
             // Update Memory Utilization Bar
             updateUtilizationBar(
@@ -352,26 +707,29 @@
             // Update Network Utilization Bar
             const totalNetwork = data.network_utilization.upload + data.network_utilization.download;
             const maxNetworkSpeed = 10000; // Adjust based on your network capacity
-            updateUtilizationBar(
-                document.getElementById('network_utilization_fill'),
-                document.getElementById('network_utilization_text'),
-                totalNetwork,
-                'KB/s',
-                maxNetworkSpeed
-            );
+            const networkPercent = (totalNetwork / maxNetworkSpeed) * 100;
+            document.getElementById('network_utilization_fill').style.width = Math.min(networkPercent, 100) + '%';
+            const utilizationClass = getUtilizationClass(networkPercent);
+            document.getElementById('network_utilization_fill').className = 'utilization-fill ' + utilizationClass;
+            // Display the formatted network info from backend
+            document.getElementById('network_utilization_text').textContent = data.network_info.replace('Upload: ', '').replace(', Download: ', ' / ');
 
             // Update Network Information
             document.getElementById('network_info').textContent = data.network_info;
             document.getElementById('disk_read_write').textContent = `Disk I/O - Read: ${data.disk_read}, Write: ${data.disk_write}`;
 
-            // Update Network Connections
-            document.getElementById('network_connections').textContent = data.network_connections;
+            // Store connection data and render
+            if (data.network_connections_list && data.network_connections_list.length > 0) {
+                currentConnectionsList = data.network_connections_list.filter(conn => conn.status !== 'NONE');
+                renderConnectionsList();
+            } else {
+                // Fallback to text display
+                document.getElementById('network_connections').innerHTML = '<pre>' + data.network_connections + '</pre>';
+            }
 
-            // Update Process List
-            const processList = data.process_list.map(proc => {
-                return `PID: ${proc.pid}, Name: ${proc.name}, CPU%: ${proc.cpu_percent.toFixed(1)}, MEM%: ${proc.memory_percent.toFixed(1)}`;
-            }).join('\n');
-            document.getElementById('process_list').textContent = processList;
+            // Store process data and render
+            currentProcessList = data.process_list;
+            renderProcessList();
 
             // Update Service Statuses
             for (const [serviceName, status] of Object.entries(data.service_status)) {

@@ -86,6 +86,22 @@ async def run_command_output(command):
         raise
 
 # Function to get network connections
+def format_bytes(bytes_value, unit='auto'):
+    """Convert bytes to human readable format"""
+    if unit == 'auto':
+        for unit_name in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if bytes_value < 1024.0:
+                return f"{bytes_value:.2f} {unit_name}"
+            bytes_value /= 1024.0
+        return f"{bytes_value:.2f} PB"
+    elif unit == 'GB':
+        return bytes_value / (1024 ** 3)
+    elif unit == 'MB':
+        return bytes_value / (1024 ** 2)
+    elif unit == 'KB':
+        return bytes_value / 1024
+    return bytes_value
+
 def get_network_connections():
     try:
         connections = psutil.net_connections(kind='inet')
@@ -129,6 +145,9 @@ async def collect_stats(previous_net_io):
         per_cpu_utilization = psutil.cpu_percent(interval=0, percpu=True)
         memory = psutil.virtual_memory()
         memory_utilization = memory.percent
+        memory_total_gb = format_bytes(memory.total, 'GB')
+        memory_available_gb = format_bytes(memory.available, 'GB')
+        memory_used_gb = format_bytes(memory.used, 'GB')
         swap = psutil.swap_memory()
         swap_utilization = swap.percent
         disk = psutil.disk_usage('/')
@@ -154,21 +173,23 @@ async def collect_stats(previous_net_io):
             })
         # Sort processes by CPU utilization descending
         processes_sorted = sorted(processes, key=lambda x: x['cpu_percent'], reverse=True)
-        # Limit to top 10 processes to reduce data size
-        processes_sorted = processes_sorted[:10]
 
         # Network info
         net_io = psutil.net_io_counters()
         sent_bytes = net_io.bytes_sent
         recv_bytes = net_io.bytes_recv
         if previous_net_io is not None:
-            sent_rate = (sent_bytes - previous_net_io.bytes_sent) / 1024  # KB/s
-            recv_rate = (recv_bytes - previous_net_io.bytes_recv) / 1024  # KB/s
+            sent_rate = sent_bytes - previous_net_io.bytes_sent  # bytes/s
+            recv_rate = recv_bytes - previous_net_io.bytes_recv  # bytes/s
         else:
             sent_rate = 0
             recv_rate = 0
-        network_info = f"Upload: {sent_rate:.2f} KB/s, Download: {recv_rate:.2f} KB/s"
-        network_utilization = {'upload': sent_rate, 'download': recv_rate}
+        # Format network rates with appropriate units
+        sent_rate_formatted = format_bytes(sent_rate, 'auto').replace(' ', ' ') + '/s'
+        recv_rate_formatted = format_bytes(recv_rate, 'auto').replace(' ', ' ') + '/s'
+        network_info = f"Upload: {sent_rate_formatted}, Download: {recv_rate_formatted}"
+        # Keep raw KB/s for charts
+        network_utilization = {'upload': sent_rate / 1024, 'download': recv_rate / 1024}
 
         # Open and active network connections
         network_connections = get_network_connections()
@@ -180,8 +201,8 @@ async def collect_stats(previous_net_io):
 
         # Disk I/O stats
         disk_io = psutil.disk_io_counters()
-        disk_read = f"{disk_io.read_bytes >> 20} MB"
-        disk_write = f"{disk_io.write_bytes >> 20} MB"
+        disk_read = format_bytes(disk_io.read_bytes, 'auto')
+        disk_write = format_bytes(disk_io.write_bytes, 'auto')
 
         # Load average (for UNIX systems)
         if hasattr(os, 'getloadavg'):
@@ -198,6 +219,9 @@ async def collect_stats(previous_net_io):
             'cpu_utilization': cpu_utilization,
             'per_cpu_utilization': per_cpu_utilization,
             'memory_utilization': memory_utilization,
+            'memory_total_gb': memory_total_gb,
+            'memory_available_gb': memory_available_gb,
+            'memory_used_gb': memory_used_gb,
             'swap_utilization': swap_utilization,
             'disk_utilization': disk_utilization,
             'network_utilization': network_utilization,
@@ -207,6 +231,7 @@ async def collect_stats(previous_net_io):
             'process_list': processes_sorted,  # Send as list of dicts
             'network_info': network_info,
             'network_connections': connections_str,
+            'network_connections_list': network_connections,  # Send structured data
             'disk_read': disk_read,
             'disk_write': disk_write,
             'load_avg': load_avg_str,
